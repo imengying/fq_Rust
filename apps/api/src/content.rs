@@ -123,9 +123,13 @@ mod tests {
         let key = decode_hex(key_hex).unwrap();
         let iv = [7u8; 16];
         let plaintext = b"plain text payload";
+        let mut buffer = [0u8; 64];
+        buffer[..plaintext.len()].copy_from_slice(plaintext);
         let ciphertext = Aes128CbcEnc::new_from_slices(&key, &iv)
             .unwrap()
-            .encrypt_padded_vec_mut::<Pkcs7>(plaintext);
+            .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+            .unwrap()
+            .to_vec();
 
         let mut payload = iv.to_vec();
         payload.extend(ciphertext);
