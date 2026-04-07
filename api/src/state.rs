@@ -1,5 +1,6 @@
 use crate::cache::TtlCache;
 use crate::config::AppConfig;
+use crate::device_pool::DevicePoolManager;
 use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
 use crate::registerkey::RegisterKeyService;
 use crate::signer::SignerClient;
@@ -10,6 +11,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
+    pub device_pool: DevicePoolManager,
     pub http_client: reqwest::Client,
     pub signer_client: SignerClient,
     pub search_cache: TtlCache<SearchResponse>,
@@ -31,9 +33,16 @@ impl AppState {
         let search_ttl = duration_from_ms(config.fq.cache.search_ttl_ms);
         let directory_ttl = duration_from_ms(config.fq.cache.directory_ttl_ms);
         let chapter_ttl = duration_from_ms(config.fq.cache.chapter_ttl_ms);
+        let device_pool = DevicePoolManager::new(
+            config.fq.device_profile.clone(),
+            config.fq.device_pool.clone(),
+            config.fq.device_pool_startup_name.clone(),
+            config.fq.device_rotate_cooldown_ms,
+        );
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
+            device_pool,
             signer_client: SignerClient::new(config.fq.signer.clone())
                 .map_err(|error| anyhow!(error.message))?,
             http_client,
@@ -47,6 +56,14 @@ impl AppState {
             ),
             config,
         }))
+    }
+
+    pub fn current_device_profile(&self) -> crate::config::DeviceProfile {
+        self.device_pool.current_profile()
+    }
+
+    pub fn rotate_device_if_allowed(&self, reason: &str) -> bool {
+        self.device_pool.rotate_if_allowed(reason)
     }
 }
 

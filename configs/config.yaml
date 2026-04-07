@@ -24,6 +24,7 @@ fq:
   search:
     phase1_delay_min_ms: 1000
     phase1_delay_max_ms: 2000
+  device_rotate_cooldown_ms: 60000
   device_pool_startup_name: dev01
   device_pool:
     - name: dev01

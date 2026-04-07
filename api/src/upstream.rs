@@ -1,4 +1,4 @@
-use crate::config::{DeviceProfile, UpstreamDevice};
+use crate::config::DeviceProfile;
 use crate::content::{decrypt_and_decompress_content, extract_text, extract_title};
 use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{
@@ -46,15 +46,22 @@ pub async fn search_books(
         size,
         tab_type,
         search_id.clone(),
-        &state.config.fq.device_profile.device,
     );
 
     let response = if request.search_id.is_some() {
-        execute_search_once(state, &request).await?
+        execute_search_once_with_rotation(state, &request, "SEARCH_WITH_ID_FAIL").await?
     } else {
         request.is_first_enter_search = true;
         request.last_search_page_interval = 0;
-        let first_response = execute_search_once(state, &request).await?;
+        let mut first_response =
+            execute_search_once_with_rotation(state, &request, "SEARCH_PHASE1_FAIL").await?;
+        if first_response.search_id.is_none()
+            && first_response.books.is_empty()
+            && state.rotate_device_if_allowed("SEARCH_NO_SEARCH_ID")
+        {
+            first_response =
+                execute_search_once_with_rotation(state, &request, "SEARCH_NO_SEARCH_ID_RETRY").await?;
+        }
         if first_response.search_id.is_some() || !first_response.books.is_empty() {
             if let Some(search_id) = first_response.search_id.clone() {
                 let delay_ms = bounded_delay(
@@ -66,7 +73,8 @@ pub async fn search_books(
                 second_request.search_id = Some(search_id.clone());
                 second_request.is_first_enter_search = false;
                 second_request.last_search_page_interval = delay_ms as i32;
-                let mut second_response = execute_search_once(state, &second_request).await?;
+                let mut second_response =
+                    execute_search_once_with_rotation(state, &second_request, "SEARCH_PHASE2_FAIL").await?;
                 if second_response.search_id.is_none() {
                     second_response.search_id = Some(search_id);
                 }
@@ -170,14 +178,35 @@ async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> Serv
         return Ok(cached);
     }
 
-    let device = &state.config.fq.device_profile;
-    let params = build_directory_params(device, book_id, minimal);
+    let directory = match fetch_directory_once(state, book_id, minimal).await {
+        Ok(value) => value,
+        Err(error) => {
+            if should_rotate_after_error(&error) && state.rotate_device_if_allowed("DIRECTORY_FAIL") {
+                fetch_directory_once(state, book_id, minimal).await?
+            } else {
+                return Err(error);
+            }
+        }
+    };
+
+    state.directory_cache.insert(cache_key, directory.clone());
+    Ok(directory)
+}
+
+async fn fetch_directory_once(
+    state: &AppState,
+    book_id: &str,
+    minimal: bool,
+) -> ServiceResult<DirectoryResponse> {
+    let device = state.current_device_profile();
+
+    let params = build_directory_params(&device, book_id, minimal);
     let url = build_url(
         &state.config.fq.upstream.resolved_search_base_url(),
         DIRECTORY_PATH,
         &params,
     )?;
-    let root = execute_signed_json_get(state, &url, build_common_headers(device)).await?;
+    let root = execute_signed_json_get(state, &url, build_common_headers(&device)).await?;
     let upstream_code = root.get("code").and_then(Value::as_i64).unwrap_or_default();
     if upstream_code != 0 {
         let message = root
@@ -195,20 +224,18 @@ async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> Serv
     if minimal {
         trim_directory_for_minimal(&mut directory);
     }
-
-    state.directory_cache.insert(cache_key, directory.clone());
     Ok(directory)
 }
 
 async fn execute_search_once(state: &AppState, request: &SearchUpstreamRequest) -> ServiceResult<SearchResponse> {
-    let device = &state.config.fq.device_profile;
-    let params = build_search_params(device, request);
+    let device = state.current_device_profile();
+    let params = build_search_params(&device, request);
     let url = build_url(
         &state.config.fq.upstream.resolved_search_base_url(),
         SEARCH_PATH,
         &params,
     )?;
-    let root = execute_signed_json_get(state, &url, build_search_headers(device)).await?;
+    let root = execute_signed_json_get(state, &url, build_search_headers(&device)).await?;
     let upstream_code = root.get("code").and_then(Value::as_i64).unwrap_or_default();
     if upstream_code != 0 {
         let message = root
@@ -221,15 +248,49 @@ async fn execute_search_once(state: &AppState, request: &SearchUpstreamRequest) 
     Ok(parse_search_response(&root, request.tab_type))
 }
 
+async fn execute_search_once_with_rotation(
+    state: &AppState,
+    request: &SearchUpstreamRequest,
+    reason: &str,
+) -> ServiceResult<SearchResponse> {
+    match execute_search_once(state, request).await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            if should_rotate_after_error(&error) && state.rotate_device_if_allowed(reason) {
+                execute_search_once(state, request).await
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
 async fn fetch_batch_full(
     state: &AppState,
     book_id: &str,
     item_ids: &[String],
 ) -> ServiceResult<BatchFullResponse> {
-    let device = &state.config.fq.device_profile;
-    let params = build_batch_full_params(device, item_ids, book_id);
+    match fetch_batch_full_once(state, book_id, item_ids).await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            if should_rotate_after_error(&error) && state.rotate_device_if_allowed("BATCH_FULL_FAIL") {
+                fetch_batch_full_once(state, book_id, item_ids).await
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+async fn fetch_batch_full_once(
+    state: &AppState,
+    book_id: &str,
+    item_ids: &[String],
+) -> ServiceResult<BatchFullResponse> {
+    let device = state.current_device_profile();
+    let params = build_batch_full_params(&device, item_ids, book_id);
     let url = build_url(&state.config.fq.upstream.base_url, BATCH_FULL_PATH, &params)?;
-    let root = execute_signed_json_get(state, &url, build_common_headers(device)).await?;
+    let root = execute_signed_json_get(state, &url, build_common_headers(&device)).await?;
     let parsed: BatchFullResponse = serde_json::from_value(root.clone())
         .map_err(|error| ServiceError::internal(format!("章节响应解析失败: {error}")))?;
     if parsed.code != 0 {
@@ -242,13 +303,14 @@ async fn resolve_register_key(
     state: &AppState,
     required_keyver: Option<i64>,
 ) -> ServiceResult<RegisterKeyResolveResult> {
+    let profile = state.current_device_profile();
     state
         .register_key_service
         .resolve(
             &state.http_client,
             &state.signer_client,
             &state.config.fq.upstream,
-            &state.config.fq.device_profile,
+            &profile,
             required_keyver,
         )
         .await
@@ -773,7 +835,6 @@ impl SearchUpstreamRequest {
         count: usize,
         tab_type: u32,
         search_id: Option<String>,
-        _device: &UpstreamDevice,
     ) -> Self {
         Self {
             query,
@@ -812,6 +873,19 @@ impl SearchUpstreamRequest {
             current_volume: 75,
         }
     }
+}
+
+fn should_rotate_after_error(error: &ServiceError) -> bool {
+    if error.code == 110 {
+        return true;
+    }
+
+    let message = error.message.trim();
+    if message.is_empty() {
+        return false;
+    }
+    let uppercase = message.to_ascii_uppercase();
+    uppercase.contains("ILLEGAL_ACCESS")
 }
 
 #[derive(Debug, Clone)]

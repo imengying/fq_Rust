@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod content;
+mod device_pool;
 mod encoding;
 mod fq;
 mod models;

@@ -25,6 +25,7 @@ pub struct FqConfig {
     pub signer: SignerConfig,
     pub cache: CacheConfig,
     pub search: SearchConfig,
+    pub device_rotate_cooldown_ms: u64,
     pub device_pool_startup_name: Option<String>,
     pub device_pool: Vec<DeviceProfile>,
     pub device_profile: DeviceProfile,
@@ -117,6 +118,7 @@ impl Default for FqConfig {
             signer: SignerConfig::default(),
             cache: CacheConfig::default(),
             search: SearchConfig::default(),
+            device_rotate_cooldown_ms: 60_000,
             device_pool_startup_name: None,
             device_pool: Vec::new(),
             device_profile: DeviceProfile::default(),
@@ -240,6 +242,10 @@ impl AppConfig {
         set_u64(
             &mut self.fq.cache.register_key_max_entries,
             "FQRS_REGISTER_KEY_CACHE_MAX_ENTRIES",
+        );
+        set_u64(
+            &mut self.fq.device_rotate_cooldown_ms,
+            "FQRS_DEVICE_ROTATE_COOLDOWN_MS",
         );
     }
 

@@ -40,6 +40,7 @@ Java worker 不对外提供 HTTP 接口。
 - `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
 - `fq.device_profile`: 当前生效设备信息
 - `fq.device_pool`: 可选设备池；如果配置了，会按 `fq.device_pool_startup_name` 或首项继承到运行设备
+- `fq.device_rotate_cooldown_ms`: 运行时设备轮换冷却时间
 
 默认 worker 命令是：
 
