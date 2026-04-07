@@ -23,7 +23,7 @@ jobs:
           path: target/release/fq-api
           if-no-files-found: error
 
-  java-sidecar:
+  java-signer:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -32,11 +32,11 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - name: Build sidecar
-        run: mvn -B -f sidecar/pom.xml -DskipTests package
-      - name: Upload sidecar artifact
+      - name: Build signer
+        run: mvn -B -f signer/pom.xml -DskipTests package
+      - name: Upload signer artifact
         uses: actions/upload-artifact@v6
         with:
-          name: fq-sidecar
-          path: sidecar/target/fq-sidecar.jar
+          name: fq-signer
+          path: signer/target/fq-signer.jar
           if-no-files-found: error

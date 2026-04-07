@@ -13,7 +13,7 @@ fq:
       - java
       - --enable-native-access=ALL-UNNAMED
       - -jar
-      - /app/fq-sidecar.jar
+      - /app/fq-signer.jar
     restart_cooldown_ms: 2000
   cache:
     search_ttl_ms: 45000

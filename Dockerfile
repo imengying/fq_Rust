@@ -6,11 +6,11 @@ COPY apps/api/Cargo.toml apps/api/Cargo.toml
 COPY apps/api/src apps/api/src
 RUN cargo build --workspace --release
 
-FROM maven:3.9.13-eclipse-temurin-25 AS sidecar-builder
+FROM maven:3.9.13-eclipse-temurin-25 AS signer-builder
 
-WORKDIR /build/sidecar
-COPY sidecar/pom.xml pom.xml
-COPY sidecar/src src
+WORKDIR /build/signer
+COPY signer/pom.xml pom.xml
+COPY signer/src src
 RUN mvn -B -DskipTests package
 
 FROM gcr.io/distroless/java25-debian13:nonroot
@@ -18,7 +18,7 @@ FROM gcr.io/distroless/java25-debian13:nonroot
 WORKDIR /app
 
 COPY --from=rust-builder /app/target/release/fq-api /usr/local/bin/fq-api
-COPY --from=sidecar-builder /build/sidecar/target/fq-sidecar.jar /app/fq-sidecar.jar
+COPY --from=signer-builder /build/signer/target/fq-signer.jar /app/fq-signer.jar
 COPY configs/api.example.yaml /app/configs/api.example.yaml
 
 EXPOSE 9999

@@ -8,7 +8,7 @@
 !apps/api/src/**
 !configs/
 !configs/api.example.yaml
-!sidecar/
-!sidecar/pom.xml
-!sidecar/src/
-!sidecar/src/**
+!signer/
+!signer/pom.xml
+!signer/src/
+!signer/src/**

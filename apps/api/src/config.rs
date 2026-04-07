@@ -139,7 +139,7 @@ impl Default for SignerConfig {
                 "java".to_string(),
                 "--enable-native-access=ALL-UNNAMED".to_string(),
                 "-jar".to_string(),
-                "/app/fq-sidecar.jar".to_string(),
+                "/app/fq-signer.jar".to_string(),
             ],
             restart_cooldown_ms: 2_000,
         }

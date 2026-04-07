@@ -15,12 +15,12 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
-public final class SidecarWorker {
+public final class SignerWorker {
 
-    private static final Logger log = LoggerFactory.getLogger(SidecarWorker.class);
+    private static final Logger log = LoggerFactory.getLogger(SignerWorker.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private SidecarWorker() {
+    private SignerWorker() {
     }
 
     public static void main(String[] args) throws Exception {
@@ -81,8 +81,8 @@ public final class SidecarWorker {
         } catch (IllegalArgumentException e) {
             return WorkerResponse.error(requestId, 1001, e.getMessage());
         } catch (Exception e) {
-            log.error("sidecar worker request failed", e);
-            return WorkerResponse.error(requestId, 1500, "internal sidecar error");
+            log.error("signer worker request failed", e);
+            return WorkerResponse.error(requestId, 1500, "internal signer error");
         }
     }
 

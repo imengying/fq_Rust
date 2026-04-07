@@ -10,7 +10,7 @@
 ## 代码结构
 
 - `apps/api`: Rust API 服务
-- `sidecar`: Java worker 与 unidbg 资源
+- `signer`: Java signer worker 与 unidbg 资源
 - `configs/api.example.yaml`: 默认配置示例
 - `.github/workflows/ci.yml`: 编译与测试
 - `.github/workflows/docker-publish.yml`: Docker Hub 发布
@@ -50,7 +50,7 @@ fq:
       - java
       - --enable-native-access=ALL-UNNAMED
       - -jar
-      - /app/fq-sidecar.jar
+      - /app/fq-signer.jar
 ```
 
 也可以用环境变量 `FQRS_SIGNER_COMMAND` 覆盖。
@@ -61,7 +61,7 @@ fq:
 本地有 Rust / Java / Maven 时，最短路径如下：
 
 1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备信息和上游配置。
-2. 构建 Java worker：`mvn -f sidecar/pom.xml -DskipTests package`
+2. 构建 Java worker：`mvn -f signer/pom.xml -DskipTests package`
 3. 构建 Rust API：`cargo build --release`
 4. 启动服务：`./target/release/fq-api`
 
@@ -103,7 +103,7 @@ docker compose up --build
 - [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
 - [signer.rs](/home/mengying/文档/code/fq_Rust/apps/api/src/signer.rs)
-- [SidecarWorker.java](/home/mengying/文档/code/fq_Rust/sidecar/src/main/java/com/mengying/fqnovel/SidecarWorker.java)
+- [SignerWorker.java](/home/mengying/文档/code/fq_Rust/signer/src/main/java/com/mengying/fqnovel/SignerWorker.java)
 
 ## Docker Hub 发布
 

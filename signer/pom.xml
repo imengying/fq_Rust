@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.mengying</groupId>
-    <artifactId>fq-sidecar</artifactId>
+    <artifactId>fq-signer</artifactId>
     <version>0.1.0</version>
-    <name>fq-sidecar</name>
+    <name>fq-signer</name>
     <description>FQ Novel signer/registerkey worker</description>
 
     <properties>
@@ -56,7 +56,7 @@
     </dependencies>
 
     <build>
-        <finalName>fq-sidecar</finalName>
+        <finalName>fq-signer</finalName>
         <plugins>
             <plugin>
                 <artifactId>maven-resources-plugin</artifactId>
@@ -84,7 +84,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.mengying.fqnovel.SidecarWorker</mainClass>
+                            <mainClass>com.mengying.fqnovel.SignerWorker</mainClass>
                         </manifest>
                         <manifestEntries>
                             <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
@@ -107,7 +107,7 @@
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.mengying.fqnovel.SidecarWorker</mainClass>
+                                    <mainClass>com.mengying.fqnovel.SignerWorker</mainClass>
                                     <manifestEntries>
                                         <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
                                     </manifestEntries>
