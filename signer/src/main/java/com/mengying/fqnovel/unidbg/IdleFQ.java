@@ -49,6 +49,8 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private static final String SO_METASEC_ML_PATH = BASE_PATH + "/lib/libmetasec_ml.so";
     private static final String SO_C_SHARE_PATH = BASE_PATH + "/lib/libc++_shared.so";
     private static final String MS_CERT_FILE_PATH = BASE_PATH + "/other/ms_16777218.bin";
+    private static final String SO_METASEC_ML_NAME = "libmetasec_ml.so";
+    private static final String SO_C_SHARE_NAME = "libc++_shared.so";
 
     private static final String PACKAGE_NAME = "com.dragon.read.oversea.gp";
     private static final String DATA_USER_DIR = "/data/user/0/" + PACKAGE_NAME;
@@ -88,6 +90,10 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private final AndroidEmulator emulator;
     private final Memory memory;
     private final Module module;
+    private final DvmClass threadClass;
+    private final DvmClass stackTraceElementClass;
+    private final DvmClass integerClass;
+    private final DvmClass longClass;
     private final File apkFile;
     private final File soMetasecMlFile;
     private final File soCShareFile;
@@ -111,11 +117,16 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             this.msCertData = resources.msCertData();
 
             emulatorCandidate = createEmulator(this.rootfsDir);
-            VM vm = createVm(emulatorCandidate);
-            Module moduleCandidate = loadMainModule(emulatorCandidate, vm);
+            VM vmCandidate = createVm(emulatorCandidate);
+            CachedClasses cachedClasses = cacheVmClasses(vmCandidate);
+            Module moduleCandidate = loadMainModule(emulatorCandidate, vmCandidate);
 
             this.emulator = emulatorCandidate;
             this.memory = emulatorCandidate.getMemory();
+            this.threadClass = cachedClasses.threadClass();
+            this.stackTraceElementClass = cachedClasses.stackTraceElementClass();
+            this.integerClass = cachedClasses.integerClass();
+            this.longClass = cachedClasses.longClass();
             this.module = moduleCandidate;
 
             logResolvedResources();
@@ -163,7 +174,7 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     public DvmObject<?> callStaticObjectMethodV(BaseVM vm, DvmClass dvmClass, String signature, VaList vaList) {
         return switch (signature) {
             case MS_DISPATCH_SIGNATURE -> handleMSMethod(vm, vaList.getIntArg(0));
-            case CURRENT_THREAD_SIGNATURE -> vm.resolveClass("java/lang/Thread").newObject(Thread.currentThread());
+            case CURRENT_THREAD_SIGNATURE -> threadClass.newObject(Thread.currentThread());
             default -> super.callStaticObjectMethodV(vm, dvmClass, signature, vaList);
         };
     }
@@ -266,8 +277,11 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             log.debug("resolve ==> {}", pathname);
         }
 
-        if (pathname.contains("libmetasec_ml.so")) {
+        if (pathname.contains(SO_METASEC_ML_NAME)) {
             return openVirtualFile(oflags, soMetasecMlFile, pathname);
+        }
+        if (pathname.contains(SO_C_SHARE_NAME)) {
+            return openVirtualFile(oflags, soCShareFile, pathname);
         }
         if (APK_INSTALL_PATH.equals(pathname)) {
             return openVirtualFile(oflags, apkFile, pathname);
@@ -337,13 +351,22 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         Memory emulatorMemory = emulator.getMemory();
         emulatorMemory.setLibraryResolver(new AndroidResolver(SDK_VERSION));
 
-        VM vm = emulator.createDalvikVM();
+        VM vm = emulator.createDalvikVM(apkFile);
         vm.setJni(this);
         vm.setVerbose(loggable);
 
         new AndroidModule(emulator, vm).register(emulatorMemory);
         new JniGraphics(emulator, vm).register(emulatorMemory);
         return vm;
+    }
+
+    private CachedClasses cacheVmClasses(VM vm) {
+        return new CachedClasses(
+            vm.resolveClass("java/lang/Thread"),
+            vm.resolveClass("java/lang/StackTraceElement"),
+            vm.resolveClass("java.lang.Integer"),
+            vm.resolveClass("java/lang/Long")
+        );
     }
 
     private Module loadMainModule(AndroidEmulator emulator, VM vm) {
@@ -377,10 +400,10 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         return switch (methodId) {
             case MS_METHOD_DATA_PATH -> new StringObject(vm, MSDATA_VFS_PATH);
             case MS_METHOD_BOOL_1, MS_METHOD_BOOL_2 -> DvmBoolean.valueOf(vm, true);
-            case MS_METHOD_VERSION_CODE -> vm.resolveClass("java.lang.Integer").newObject(APP_VERSION_CODE);
+            case MS_METHOD_VERSION_CODE -> integerClass.newObject(APP_VERSION_CODE);
             case MS_METHOD_VERSION_NAME -> new StringObject(vm, "6.8.1.32");
             case MS_METHOD_CERT -> certificateBytes(vm);
-            case MS_METHOD_NOW_MS -> vm.resolveClass("java/lang/Long").newObject(System.currentTimeMillis());
+            case MS_METHOD_NOW_MS -> longClass.newObject(System.currentTimeMillis());
             default -> {
                 if (loggable) {
                     log.debug("未处理的 MS 方法 ID: {}", methodId);
@@ -395,7 +418,7 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         StackTraceElement[] elements = Thread.currentThread().getStackTrace();
         DvmObject<?>[] objects = (DvmObject<?>[]) new DvmObject[elements.length];
         for (int i = 0; i < elements.length; i++) {
-            objects[i] = vm.resolveClass("java/lang/StackTraceElement").newObject(elements[i]);
+            objects[i] = stackTraceElementClass.newObject(elements[i]);
         }
         return new ArrayObject(objects);
     }
@@ -551,6 +574,14 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         File soCShareFile,
         File rootfsDir,
         byte[] msCertData
+    ) {
+    }
+
+    private record CachedClasses(
+        DvmClass threadClass,
+        DvmClass stackTraceElementClass,
+        DvmClass integerClass,
+        DvmClass longClass
     ) {
     }
 }
