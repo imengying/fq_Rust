@@ -113,6 +113,14 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         "android/app/Application->getPackageCodePath()Ljava/lang/String;";
     private static final String APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE =
         "android/app/Application->getPackageResourcePath()Ljava/lang/String;";
+    private static final String PACKAGE_MANAGER_GET_PACKAGE_INFO_SIGNATURE =
+        "android/content/pm/PackageManager->getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;";
+    private static final String PACKAGE_MANAGER_GET_APPLICATION_INFO_SIGNATURE =
+        "android/content/pm/PackageManager->getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;";
+    private static final String PACKAGE_MANAGER_GET_INSTALLER_PACKAGE_NAME_SIGNATURE =
+        "android/content/pm/PackageManager->getInstallerPackageName(Ljava/lang/String;)Ljava/lang/String;";
+    private static final String PACKAGE_MANAGER_CHECK_PERMISSION_SIGNATURE =
+        "android/content/pm/PackageManager->checkPermission(Ljava/lang/String;Ljava/lang/String;)I";
     private static final String FILE_GET_ABSOLUTE_PATH_SIGNATURE = "java/io/File->getAbsolutePath()Ljava/lang/String;";
     private static final String FILE_GET_PATH_SIGNATURE = "java/io/File->getPath()Ljava/lang/String;";
     private static final String LONG_VALUE_SIGNATURE = "java/lang/Long->longValue()J";
@@ -143,6 +151,28 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         "android/content/pm/ApplicationInfo->sourceDir:Ljava/lang/String;";
     private static final String LEGACY_APPLICATION_INFO_SOURCE_DIR_SIGNATURE =
         "Landroid/content/pm/ApplicationInfo;->sourceDir:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_PUBLIC_SOURCE_DIR_SIGNATURE =
+        "android/content/pm/ApplicationInfo->publicSourceDir:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_DATA_DIR_SIGNATURE =
+        "android/content/pm/ApplicationInfo->dataDir:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_NATIVE_LIBRARY_DIR_SIGNATURE =
+        "android/content/pm/ApplicationInfo->nativeLibraryDir:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_PACKAGE_NAME_SIGNATURE =
+        "android/content/pm/ApplicationInfo->packageName:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_PROCESS_NAME_SIGNATURE =
+        "android/content/pm/ApplicationInfo->processName:Ljava/lang/String;";
+    private static final String APPLICATION_INFO_UID_SIGNATURE = "android/content/pm/ApplicationInfo->uid:I";
+    private static final String APPLICATION_INFO_FLAGS_SIGNATURE = "android/content/pm/ApplicationInfo->flags:I";
+    private static final String APPLICATION_INFO_TARGET_SDK_VERSION_SIGNATURE =
+        "android/content/pm/ApplicationInfo->targetSdkVersion:I";
+    private static final String PACKAGE_INFO_PACKAGE_NAME_SIGNATURE =
+        "android/content/pm/PackageInfo->packageName:Ljava/lang/String;";
+    private static final String PACKAGE_INFO_VERSION_NAME_SIGNATURE =
+        "android/content/pm/PackageInfo->versionName:Ljava/lang/String;";
+    private static final String PACKAGE_INFO_VERSION_CODE_SIGNATURE =
+        "android/content/pm/PackageInfo->versionCode:I";
+    private static final String PACKAGE_INFO_APPLICATION_INFO_SIGNATURE =
+        "android/content/pm/PackageInfo->applicationInfo:Landroid/content/pm/ApplicationInfo;";
     private static final String ANDROID_RELEASE = "6.0";
     private static final String ANDROID_SDK = Integer.toString(SDK_VERSION);
     private static final String DEVICE_BRAND = "Xiaomi";
@@ -152,6 +182,10 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private static final String DEVICE_PRODUCT = "Sirius";
     private static final String DEVICE_HARDWARE = "qcom";
     private static final String DEVICE_CPU_ABI = "arm64-v8a";
+    private static final String INSTALLER_PACKAGE_NAME = "com.android.vending";
+    private static final String APP_VERSION_NAME = "6.8.1.32";
+    private static final int APPLICATION_INFO_FLAGS = 0x81;
+    private static final String NATIVE_LIBRARY_DIR = "/data/app/" + PACKAGE_NAME + "/lib/arm64";
 
     private final boolean loggable;
     private final AndroidEmulator emulator;
@@ -166,6 +200,7 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private final DvmClass fileClass;
     private final DvmClass packageManagerClass;
     private final DvmClass applicationInfoClass;
+    private final DvmClass packageInfoClass;
     private final File apkFile;
     private final File soMetasecMlFile;
     private final File soCShareFile;
@@ -204,6 +239,7 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             this.fileClass = cachedClasses.fileClass();
             this.packageManagerClass = cachedClasses.packageManagerClass();
             this.applicationInfoClass = cachedClasses.applicationInfoClass();
+            this.packageInfoClass = cachedClasses.packageInfoClass();
             this.module = moduleCandidate;
 
             logResolvedResources();
@@ -284,6 +320,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             case CONTEXT_GET_PACKAGE_CODE_PATH_SIGNATURE, CONTEXT_GET_PACKAGE_RESOURCE_PATH_SIGNATURE,
                 APPLICATION_GET_PACKAGE_CODE_PATH_SIGNATURE, APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE ->
                 new StringObject(vm, apkFile.getAbsolutePath());
+            case PACKAGE_MANAGER_GET_PACKAGE_INFO_SIGNATURE -> packageInfoClass.newObject(null);
+            case PACKAGE_MANAGER_GET_APPLICATION_INFO_SIGNATURE -> applicationInfoClass.newObject(null);
+            case PACKAGE_MANAGER_GET_INSTALLER_PACKAGE_NAME_SIGNATURE -> new StringObject(vm, INSTALLER_PACKAGE_NAME);
             case FILE_GET_ABSOLUTE_PATH_SIGNATURE, FILE_GET_PATH_SIGNATURE -> {
                 File file = (File) dvmObject.getValue();
                 yield new StringObject(vm, file.getAbsolutePath());
@@ -337,6 +376,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             }
         }
         if (CHECK_SELF_PERMISSION_SIGNATURE.equals(signature)) {
+            return 0;
+        }
+        if (PACKAGE_MANAGER_CHECK_PERMISSION_SIGNATURE.equals(signature)) {
             return 0;
         }
         return super.callIntMethodV(vm, dvmObject, signature, vaList);
@@ -471,7 +513,8 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             vm.resolveClass("java/lang/Long"),
             vm.resolveClass("java/io/File"),
             vm.resolveClass("android/content/pm/PackageManager"),
-            vm.resolveClass("android/content/pm/ApplicationInfo")
+            vm.resolveClass("android/content/pm/ApplicationInfo"),
+            vm.resolveClass("android/content/pm/PackageInfo")
         );
     }
 
@@ -555,6 +598,18 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         if (BUILD_VERSION_SDK_INT_SIGNATURE.equals(signature)) {
             return SDK_VERSION;
         }
+        if (APPLICATION_INFO_UID_SIGNATURE.equals(signature)) {
+            return APP_UID;
+        }
+        if (APPLICATION_INFO_FLAGS_SIGNATURE.equals(signature)) {
+            return APPLICATION_INFO_FLAGS;
+        }
+        if (APPLICATION_INFO_TARGET_SDK_VERSION_SIGNATURE.equals(signature)) {
+            return SDK_VERSION;
+        }
+        if (PACKAGE_INFO_VERSION_CODE_SIGNATURE.equals(signature)) {
+            return APP_VERSION_CODE;
+        }
         if (loggable) {
             log.debug("未处理的静态整数字段，降级返回0: {}", signature);
         }
@@ -586,6 +641,14 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         return switch (signature) {
             case APPLICATION_INFO_SOURCE_DIR_SIGNATURE, LEGACY_APPLICATION_INFO_SOURCE_DIR_SIGNATURE ->
                 new StringObject(vm, apkFile.getAbsolutePath());
+            case APPLICATION_INFO_PUBLIC_SOURCE_DIR_SIGNATURE -> new StringObject(vm, apkFile.getAbsolutePath());
+            case APPLICATION_INFO_DATA_DIR_SIGNATURE -> new StringObject(vm, DATA_USER_DIR);
+            case APPLICATION_INFO_NATIVE_LIBRARY_DIR_SIGNATURE -> new StringObject(vm, NATIVE_LIBRARY_DIR);
+            case APPLICATION_INFO_PACKAGE_NAME_SIGNATURE, APPLICATION_INFO_PROCESS_NAME_SIGNATURE ->
+                new StringObject(vm, PACKAGE_NAME);
+            case PACKAGE_INFO_PACKAGE_NAME_SIGNATURE -> new StringObject(vm, PACKAGE_NAME);
+            case PACKAGE_INFO_VERSION_NAME_SIGNATURE -> new StringObject(vm, APP_VERSION_NAME);
+            case PACKAGE_INFO_APPLICATION_INFO_SIGNATURE -> applicationInfoClass.newObject(null);
             default -> super.getObjectField(vm, dvmObject, signature);
         };
     }
@@ -746,7 +809,8 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         DvmClass longClass,
         DvmClass fileClass,
         DvmClass packageManagerClass,
-        DvmClass applicationInfoClass
+        DvmClass applicationInfoClass,
+        DvmClass packageInfoClass
     ) {
     }
 }
