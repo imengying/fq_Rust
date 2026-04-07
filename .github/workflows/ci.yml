@@ -10,17 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Rust tests
         run: cargo test --workspace
       - name: Rust release build
         run: cargo build --workspace --release
-      - name: Upload Rust artifact
+      - name: Upload fq-api artifact
         uses: actions/upload-artifact@v6
         with:
           name: fq-api
           path: target/release/fq-api
+          if-no-files-found: error
+      - name: Upload fq-signer-native artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: fq-signer-native
+          path: target/release/fq-signer-native
           if-no-files-found: error
 
   java-signer:

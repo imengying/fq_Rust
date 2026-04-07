@@ -29,14 +29,16 @@ trait SignerBackend: Send + Sync {
 impl SignerClient {
     pub fn new(config: SignerConfig) -> ServiceResult<Self> {
         let backend: Arc<dyn SignerBackend> = match config.backend {
-            SignerBackendKind::JavaWorker => Arc::new(JavaWorkerSignerBackend::new(
+            SignerBackendKind::JavaWorker => Arc::new(ProcessSignerBackend::new(
+                "java_worker",
                 config.command,
                 config.restart_cooldown_ms,
             )?),
-            SignerBackendKind::RustNative => {
-                warn!("signer backend rust_native is selected, but native signer is not implemented yet");
-                Arc::new(RustNativeSignerBackend)
-            }
+            SignerBackendKind::RustNative => Arc::new(ProcessSignerBackend::new(
+                "rust_native",
+                config.command,
+                config.restart_cooldown_ms,
+            )?),
         };
         Ok(Self { backend })
     }
@@ -63,21 +65,27 @@ impl SignerClient {
     }
 }
 
-struct JavaWorkerSignerBackend {
+struct ProcessSignerBackend {
+    name: &'static str,
     inner: Arc<Mutex<SignerProcess>>,
 }
 
-impl JavaWorkerSignerBackend {
-    fn new(command: Vec<String>, restart_cooldown_ms: u64) -> ServiceResult<Self> {
+impl ProcessSignerBackend {
+    fn new(
+        name: &'static str,
+        command: Vec<String>,
+        restart_cooldown_ms: u64,
+    ) -> ServiceResult<Self> {
         let mut process = SignerProcess::new(command, restart_cooldown_ms);
         process.ensure_started()?;
         Ok(Self {
+            name,
             inner: Arc::new(Mutex::new(process)),
         })
     }
 }
 
-impl SignerBackend for JavaWorkerSignerBackend {
+impl SignerBackend for ProcessSignerBackend {
     fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
         let headers_text = build_signature_input_headers(headers);
         let mut process = self
@@ -87,7 +95,12 @@ impl SignerBackend for JavaWorkerSignerBackend {
 
         match process.sign(url, &headers_text) {
             Ok(raw) => {
-                info!("signer raw output (len={}): {}", raw.len(), truncate(&raw, 800));
+                info!(
+                    "signer raw output: backend={}, len={}, {}",
+                    self.name,
+                    raw.len(),
+                    truncate(&raw, 800)
+                );
                 Ok(SignResult {
                     headers: parse_signature_result(&raw)?,
                 })
@@ -112,20 +125,6 @@ impl SignerBackend for JavaWorkerSignerBackend {
             .lock()
             .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
         process.restart_if_allowed(reason)
-    }
-}
-
-struct RustNativeSignerBackend;
-
-impl SignerBackend for RustNativeSignerBackend {
-    fn sign_blocking(&self, _url: &str, _headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
-        Err(ServiceError::internal(
-            "rust_native signer backend is not implemented yet",
-        ))
-    }
-
-    fn restart_blocking(&self, _reason: &str) -> ServiceResult<bool> {
-        Ok(false)
     }
 }
 
