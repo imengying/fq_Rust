@@ -1,0 +1,42 @@
+server:
+  host: 0.0.0.0
+  port: 9999
+
+fq:
+  upstream:
+    base_url: https://api5-normal-sinfonlineb.fqnovel.com
+    search_base_url: https://api5-normal-sinfonlinec.fqnovel.com
+    connect_timeout_ms: 15000
+    read_timeout_ms: 30000
+  sidecar:
+    base_url: http://127.0.0.1:18080
+    internal_token: change-me-in-production
+    timeout_ms: 10000
+  cache:
+    search_ttl_ms: 45000
+    directory_ttl_ms: 600000
+    chapter_ttl_ms: 600000
+  search:
+    phase1_delay_min_ms: 1000
+    phase1_delay_max_ms: 2000
+  device_profile:
+    name: dev01
+    user_agent: "com.dragon.read.oversea.gp/68132 (Linux; U; Android 13; zh_CN; Sirius; Build/V417IR;tt-ok/3.12.13.4-tiktok)"
+    cookie: "store-region=cn-zj; store-region-src=did; install_id=573270579220059"
+    device:
+      aid: "1967"
+      cdid: "9daf93bf-4dcf-417e-8795-20284ad26a1f"
+      device_id: "1778337441136410"
+      device_type: "Sirius"
+      device_brand: "Xiaomi"
+      install_id: "573270579220059"
+      resolution: "2244*1080"
+      dpi: "440"
+      rom_version: "V417IR+release-keys"
+      host_abi: "arm64-v8a"
+      update_version_code: "68132"
+      version_code: "68132"
+      version_name: "6.8.1.32"
+      os_version: "13"
+      os_api: "33"
+

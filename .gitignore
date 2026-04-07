@@ -1,0 +1,11 @@
+/target
+/.idea
+/.vscode
+/.DS_Store
+**/target
+**/*.log
+**/*.tmp
+**/.classpath
+**/.project
+**/.settings
+.codex

@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:18080}
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: fq-sidecar
+  main:
+    banner-mode: "off"
+
+internal:
+  api:
+    token: ${INTERNAL_API_TOKEN:change-me-in-production}
+
+fq:
+  upstream:
+    base-url: ${FQ_UPSTREAM_BASE_URL:https://api5-normal-sinfonlineb.fqnovel.com}
+    register-key-cache-ttl-ms: ${REGISTER_KEY_CACHE_TTL_MS:3600000}
+    register-key-cache-max-entries: ${REGISTER_KEY_CACHE_MAX_ENTRIES:128}
+    connect-timeout-ms: ${FQ_UPSTREAM_CONNECT_TIMEOUT_MS:15000}
+    read-timeout-ms: ${FQ_UPSTREAM_READ_TIMEOUT_MS:30000}
+
+application:
+  unidbg:
+    reset-cooldown-ms: ${SIGNER_RESET_COOLDOWN_MS:2000}
+    upstream-empty-reset-cooldown-ms: ${SIGNER_UPSTREAM_EMPTY_RESET_COOLDOWN_MS:8000}
+    apk-classpath: com/dragon/read/oversea/gp/apk/base.apk
