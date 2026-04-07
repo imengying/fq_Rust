@@ -29,225 +29,104 @@ import com.github.unidbg.virtualmodule.android.AndroidModule;
 import com.github.unidbg.virtualmodule.android.JniGraphics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.LinkedHashMap;
-import java.util.Map;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 @SuppressWarnings("unchecked")
-public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
+public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
 
     private static final Logger log = LoggerFactory.getLogger(IdleFQ.class);
 
-    // 资源路径常量
     private static final String BASE_PATH = "com/dragon/read/oversea/gp";
     private static final String DEFAULT_APK_RESOURCE_PATH = BASE_PATH + "/apk/base.apk";
     private static final String SO_METASEC_ML_PATH = BASE_PATH + "/lib/libmetasec_ml.so";
     private static final String SO_C_SHARE_PATH = BASE_PATH + "/lib/libc++_shared.so";
     private static final String MS_CERT_FILE_PATH = BASE_PATH + "/other/ms_16777218.bin";
 
-    // 应用相关常量
     private static final String PACKAGE_NAME = "com.dragon.read.oversea.gp";
+    private static final String DATA_USER_DIR = "/data/user/0/" + PACKAGE_NAME;
+    private static final String DATA_FILES_DIR = DATA_USER_DIR + "/files";
+    private static final String MSDATA_VFS_PATH = DATA_FILES_DIR + "/.msdata";
     private static final String APK_INSTALL_PATH = "/data/app/com.dragon.read.oversea.gp-q5NyjSN9BLSTVBJ54kg7YA==/base.apk";
-    private static final int SDK_VERSION = 23;
 
-    private final AndroidEmulator emulator;
-    private final Module module;
-    private final Memory memory;
+    private static final int SDK_VERSION = 23;
+    private static final int APP_UID = 10074;
+    private static final int APP_VERSION_CODE = 68132;
+    private static final long SIGN_FUNCTION_OFFSET = 0x168c80L;
+
+    private static final int MS_METHOD_DATA_PATH = 65539;
+    private static final int MS_METHOD_BOOL_1 = 33554433;
+    private static final int MS_METHOD_BOOL_2 = 33554434;
+    private static final int MS_METHOD_VERSION_CODE = 16777232;
+    private static final int MS_METHOD_VERSION_NAME = 16777233;
+    private static final int MS_METHOD_CERT = 16777218;
+    private static final int MS_METHOD_NOW_MS = 268435470;
+
+    private static final String MS_DISPATCH_SIGNATURE =
+        "com/bytedance/mobsec/metasec/ml/MS->b(IIJLjava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;";
+    private static final String CURRENT_THREAD_SIGNATURE = "java/lang/Thread->currentThread()Ljava/lang/Thread;";
+    private static final String THREAD_STACK_TRACE_SIGNATURE =
+        "java/lang/Thread->getStackTrace()[Ljava/lang/StackTraceElement;";
+    private static final String STACK_TRACE_CLASS_NAME_SIGNATURE =
+        "java/lang/StackTraceElement->getClassName()Ljava/lang/String;";
+    private static final String STACK_TRACE_METHOD_NAME_SIGNATURE =
+        "java/lang/StackTraceElement->getMethodName()Ljava/lang/String;";
+    private static final String THREAD_GET_BYTES_SIGNATURE = "java/lang/Thread->getBytes(Ljava/lang/String;)[B";
+    private static final String LONG_VALUE_SIGNATURE = "java/lang/Long->longValue()J";
+    private static final String INTEGER_VALUE_SIGNATURE = "java/lang/Integer->intValue()I";
+    private static final String BOOLEAN_VALUE_SIGNATURE = "java/lang/Boolean->booleanValue()Z";
+    private static final String PATCHED_MS_VOID_SIGNATURE = "com/bytedance/mobsec/metasec/ml/MS->a()V";
+
     private final boolean loggable;
-    private final String apkPath;
-    private final String resourceRoot;
+    private final AndroidEmulator emulator;
+    private final Memory memory;
+    private final Module module;
+    private final File apkFile;
+    private final File soMetasecMlFile;
+    private final File soCShareFile;
+    private final File rootfsDir;
+    private final byte[] msCertData;
     private final ReentrantLock lifecycleLock = new ReentrantLock();
 
-    // 临时文件缓存
-    private File tempApkFile;
-    private File tempSoMetasecMlFile;
-    private File tempSoCShareFile;
-    private File tempRootfsDir;
-    private File tempMsCertFile;
     private volatile boolean destroyed = false;
 
     public IdleFQ(boolean loggable, String apkPath, String resourceRoot) {
         this.loggable = loggable;
-        this.apkPath = apkPath;
-        this.resourceRoot = resourceRoot;
+
         AndroidEmulator emulatorCandidate = null;
-        Memory memoryCandidate = null;
-        Module moduleCandidate = null;
+        ResolvedResources resources = null;
         try {
-            // 初始化临时文件
-            initTempFiles();
+            resources = resolveResources(apkPath, resourceRoot);
+            this.apkFile = resources.apkFile();
+            this.soMetasecMlFile = resources.soMetasecMlFile();
+            this.soCShareFile = resources.soCShareFile();
+            this.rootfsDir = resources.rootfsDir();
+            this.msCertData = resources.msCertData();
 
-            // 创建模拟器
-            emulatorCandidate = AndroidEmulatorBuilder
-                .for64Bit()
-                .setRootDir(tempRootfsDir)
-                .setProcessName(PACKAGE_NAME)
-                .addBackendFactory(new Unicorn2Factory(true))
-                .build();
-
-            // 设置inode和uid
-            initEmulatorSettings(emulatorCandidate);
-
-            // 设置系统调用处理器
-            SyscallHandler<AndroidFileIO> handler = emulatorCandidate.getSyscallHandler();
-            handler.setVerbose(false);
-            handler.addIOResolver(this);
-
-            // 初始化内存和VM
-            memoryCandidate = emulatorCandidate.getMemory();
-            memoryCandidate.setLibraryResolver(new AndroidResolver(SDK_VERSION));
-
-            VM vm = emulatorCandidate.createDalvikVM();
-            vm.setJni(this);
-            vm.setVerbose(loggable);
-
-            // 导入第三方虚拟模块
-            new AndroidModule(emulatorCandidate, vm).register(memoryCandidate);
-            new JniGraphics(emulatorCandidate, vm).register(memoryCandidate);
-
-            // 载入依赖so库
-            vm.loadLibrary(tempSoCShareFile, false);
-
-            // 初始化JNI对应类
-            DvmClass bridgeClass = vm.resolveClass("ms/bd/c/m");
-            DvmClass a4a = vm.resolveClass("ms/bd/c/a4$a", bridgeClass);
-            vm.resolveClass("com/bytedance/mobsec/metasec/ml/MS", a4a);
-
-            // 加载主要so库
-            DalvikModule dm = vm.loadLibrary(tempSoMetasecMlFile, true);
-            moduleCandidate = dm.getModule();
-            dm.callJNI_OnLoad(emulatorCandidate);
+            emulatorCandidate = createEmulator(this.rootfsDir);
+            VM vm = createVm(emulatorCandidate);
+            Module moduleCandidate = loadMainModule(emulatorCandidate, vm);
 
             this.emulator = emulatorCandidate;
-            this.memory = memoryCandidate;
+            this.memory = emulatorCandidate.getMemory();
             this.module = moduleCandidate;
 
+            logResolvedResources();
             log.info("初始化完成");
         } catch (Exception e) {
-            cleanupAfterInitFailure(emulatorCandidate);
+            cleanupAfterInitFailure(emulatorCandidate, resources);
             log.error("初始化失败", e);
             throw new RuntimeException("初始化失败", e);
         }
     }
 
-    /**
-     * 初始化临时文件
-     */
-    private void initTempFiles() throws IOException {
-        try {
-            tempApkFile = resolveApkFile();
-            tempSoMetasecMlFile = resolveBundledResourceFile(SO_METASEC_ML_PATH);
-            tempSoCShareFile = resolveBundledResourceFile(SO_C_SHARE_PATH);
-            tempMsCertFile = resolveBundledResourceFile(MS_CERT_FILE_PATH);
-
-            // 处理rootfs目录
-            tempRootfsDir = createTempDir("fq_rootfs");
-            prepareRootfs(tempRootfsDir.toPath());
-
-            if (tempApkFile == null || !tempApkFile.exists()) {
-                throw new IOException("APK 文件不存在或不可用");
-            }
-            if (loggable) {
-                log.debug("临时APK文件: {}", tempApkFile.getAbsolutePath());
-                log.debug("临时SO主文件: {}", tempSoMetasecMlFile.getAbsolutePath());
-                log.debug("临时SO共享库文件: {}", tempSoCShareFile.getAbsolutePath());
-                log.debug("临时证书文件: {}", tempMsCertFile.getAbsolutePath());
-                log.debug("临时rootfs目录: {}", tempRootfsDir.getAbsolutePath());
-            }
-        } catch (Exception e) {
-            log.error("初始化临时文件失败", e);
-            throw new IOException("初始化临时文件失败", e);
-        }
-    }
-
-    /**
-     * 准备模拟器 rootfs 的关键目录/文件，避免 SDK 初始化阶段因路径不存在而失败。
-     */
-    private void prepareRootfs(Path rootfs) throws IOException {
-        // MS SDK 可能会依赖该目录/文件来存放持久化数据
-        Path msDataDir = rootfs.resolve("data/user/0/" + PACKAGE_NAME + "/files");
-        Files.createDirectories(msDataDir);
-
-        Path msDataFile = msDataDir.resolve(".msdata");
-        if (!Files.exists(msDataFile)) {
-            Files.createFile(msDataFile);
-        }
-
-        // 部分逻辑会访问 /data/system、/data/app、/sdcard/android 等目录
-        Files.createDirectories(rootfs.resolve("data/system"));
-        Files.createDirectories(rootfs.resolve("data/app"));
-        Files.createDirectories(rootfs.resolve("sdcard/android"));
-    }
-
-    private File resolveApkFile() throws IOException {
-        String configuredApkPath = trimToNull(apkPath);
-        if (configuredApkPath != null) {
-            File apkFile = new File(configuredApkPath);
-            if (!apkFile.exists() || !apkFile.isFile()) {
-                throw new IOException("APK 文件不存在: " + apkFile.getAbsolutePath());
-            }
-            return apkFile;
-        }
-
-        return resolveBundledResourceFile(DEFAULT_APK_RESOURCE_PATH);
-    }
-
-    /**
-     * 创建临时目录
-     */
-    private File createTempDir(String prefix) throws IOException {
-        return Files.createTempDirectory(prefix).toFile();
-    }
-
-    private File resolveBundledResourceFile(String relativePath) throws IOException {
-        String normalizedRoot = trimToNull(resourceRoot);
-        if (normalizedRoot == null) {
-            throw new IOException("未配置 UNIDBG_RESOURCE_ROOT");
-        }
-
-        Path filePath = Path.of(normalizedRoot).resolve(relativePath).normalize();
-        File file = filePath.toFile();
-        if (!file.exists() || !file.isFile()) {
-            throw new IOException("资源文件不存在: " + file.getAbsolutePath());
-        }
-        return file;
-    }
-
-    private static String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
-
-    /**
-     * 初始化模拟器设置
-     */
-    private void initEmulatorSettings(AndroidEmulator emulator) {
-        Map<String, Integer> iNode = new LinkedHashMap<>();
-        iNode.put("/data/system", 671745);
-        iNode.put("/data/app", 327681);
-        iNode.put("/sdcard/android", 294915);
-        iNode.put("/data/user/0/com.dragon.read.oversea.gp", 655781);
-        iNode.put("/data/user/0/com.dragon.read.oversea.gp/files", 655864);
-        emulator.set("inode", iNode);
-        emulator.set("uid", 10074);
-
-    }
-
-    /**
-     * 生成API请求签名
-     *
-     * @param url    API请求的URL
-     * @param header HTTP请求头信息，格式为key\r\nvalue\r\n的字符串
-     * @return 生成的签名字符串，失败时返回null
-     */
     public String generateSignature(String url, String header) {
         lifecycleLock.lock();
         try {
@@ -262,29 +141,16 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
                 log.debug("准备生成签名 - Header: {}", header);
             }
 
-            // 调用native方法生成签名
-            Number number = module.callFunction(emulator, 0x168c80, url, header);
-
-            if (number == null) {
-                log.error("调用native方法失败，返回结果为null");
-                return null;
-            }
-
-            // 获取返回结果
-            UnidbgPointer result = memory.pointer(number.longValue());
+            UnidbgPointer result = invokeSignFunction(url, header);
             if (result == null) {
-                log.error("获取结果指针失败");
                 return null;
             }
 
             String signature = result.getString(0);
-
             if (loggable) {
                 log.debug("签名生成成功: {}", signature);
             }
-
             return signature;
-
         } catch (Exception e) {
             log.error("生成签名过程出错: {}", e.getMessage(), e);
             return null;
@@ -293,53 +159,12 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
         }
     }
 
-    // 环境补充相关方法
     @Override
     public DvmObject<?> callStaticObjectMethodV(BaseVM vm, DvmClass dvmClass, String signature, VaList vaList) {
         return switch (signature) {
-            case "com/bytedance/mobsec/metasec/ml/MS->b(IIJLjava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;" -> {
-                int i = vaList.getIntArg(0);
-                yield handleMSMethod(vm, i);
-            }
-            case "java/lang/Thread->currentThread()Ljava/lang/Thread;" ->
-                vm.resolveClass("java/lang/Thread").newObject(Thread.currentThread());
+            case MS_DISPATCH_SIGNATURE -> handleMSMethod(vm, vaList.getIntArg(0));
+            case CURRENT_THREAD_SIGNATURE -> vm.resolveClass("java/lang/Thread").newObject(Thread.currentThread());
             default -> super.callStaticObjectMethodV(vm, dvmClass, signature, vaList);
-        };
-    }
-
-    /**
-     * 处理MS方法调用
-     */
-    private DvmObject<?> handleMSMethod(BaseVM vm, int methodId) {
-        return switch (methodId) {
-            case 65539 -> new StringObject(vm, "/data/user/0/" + PACKAGE_NAME + "/files/.msdata");
-            case 33554433, 33554434 -> DvmBoolean.valueOf(vm, true);
-            case 16777232 -> vm.resolveClass("java.lang.Integer").newObject(68132);
-            case 16777233 -> new StringObject(vm, "6.8.1.32");
-            case 16777218 -> {
-                try {
-                    if (tempMsCertFile != null && tempMsCertFile.exists()) {
-                        byte[] fileData = Files.readAllBytes(tempMsCertFile.toPath());
-                        if (loggable) {
-                            log.debug("成功读取证书文件: {} bytes", fileData.length);
-                        }
-                        yield new ByteArray(vm, fileData);
-                    } else {
-                        log.warn("证书文件不存在: {}", tempMsCertFile);
-                        yield null;
-                    }
-                } catch (IOException e) {
-                    log.error("读取证书文件失败", e);
-                    yield null;
-                }
-            }
-            case 268435470 -> vm.resolveClass("java/lang/Long").newObject(System.currentTimeMillis());
-            default -> {
-                if (loggable) {
-                    log.debug("未处理的MS方法ID: {}", methodId);
-                }
-                yield null;
-            }
         };
     }
 
@@ -347,24 +172,16 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
     @Override
     public DvmObject<?> callObjectMethodV(BaseVM vm, DvmObject<?> dvmObject, String signature, VaList vaList) {
         return switch (signature) {
-            case "java/lang/Thread->getStackTrace()[Ljava/lang/StackTraceElement;" -> {
-                StackTraceElement[] elements = Thread.currentThread().getStackTrace();
-                @SuppressWarnings({"unchecked", "rawtypes"})
-                DvmObject<?>[] objs = (DvmObject<?>[]) new DvmObject[elements.length];
-                for (int i = 0; i < elements.length; i++) {
-                    objs[i] = vm.resolveClass("java/lang/StackTraceElement").newObject(elements[i]);
-                }
-                yield new ArrayObject(objs);
-            }
-            case "java/lang/StackTraceElement->getClassName()Ljava/lang/String;" -> {
+            case THREAD_STACK_TRACE_SIGNATURE -> buildStackTraceArray(vm);
+            case STACK_TRACE_CLASS_NAME_SIGNATURE -> {
                 StackTraceElement element = (StackTraceElement) dvmObject.getValue();
                 yield new StringObject(vm, element.getClassName());
             }
-            case "java/lang/StackTraceElement->getMethodName()Ljava/lang/String;" -> {
+            case STACK_TRACE_METHOD_NAME_SIGNATURE -> {
                 StackTraceElement element = (StackTraceElement) dvmObject.getValue();
                 yield new StringObject(vm, element.getMethodName());
             }
-            case "java/lang/Thread->getBytes(Ljava/lang/String;)[B" -> {
+            case THREAD_GET_BYTES_SIGNATURE -> {
                 String arg0 = (String) vaList.getObjectArg(0).getValue();
                 if (loggable) {
                     log.debug("java/lang/Thread->getBytes arg0: {}", arg0);
@@ -377,7 +194,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
 
     @Override
     public long callLongMethodV(BaseVM vm, DvmObject<?> dvmObject, String signature, VaList vaList) {
-        if ("java/lang/Long->longValue()J".equals(signature)) {
+        if (LONG_VALUE_SIGNATURE.equals(signature)) {
             Object value = dvmObject.getValue();
             if (value instanceof Long l) {
                 return l;
@@ -391,7 +208,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
         if (loggable) {
             log.debug("getStaticIntField: {}", signature);
         }
-        if ("com/bytedance/mobsec/metasec/ml/MS->a()V".equals(signature)) {
+        if (PATCHED_MS_VOID_SIGNATURE.equals(signature)) {
             return 0x40;
         }
         if (loggable) {
@@ -406,9 +223,9 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
             log.debug("callVoidMethod: {}", signature);
         }
         switch (signature) {
-            case "com/bytedance/mobsec/metasec/ml/MS->a()V" -> {
+            case PATCHED_MS_VOID_SIGNATURE -> {
                 if (loggable) {
-                    log.debug("Patched: com/bytedance/mobsec/metasec/ml/MS->a()V");
+                    log.debug("Patched: {}", PATCHED_MS_VOID_SIGNATURE);
                 }
             }
             default -> super.callVoidMethod(vm, dvmObject, signature, varArg);
@@ -417,7 +234,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
 
     @Override
     public int callIntMethodV(BaseVM vm, DvmObject<?> dvmObject, String signature, VaList vaList) {
-        if ("java/lang/Integer->intValue()I".equals(signature)) {
+        if (INTEGER_VALUE_SIGNATURE.equals(signature)) {
             Object value = dvmObject.getValue();
             if (value instanceof Integer i) {
                 return i;
@@ -431,7 +248,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
 
     @Override
     public boolean callBooleanMethodV(BaseVM vm, DvmObject<?> dvmObject, String signature, VaList vaList) {
-        if ("java/lang/Boolean->booleanValue()Z".equals(signature)) {
+        if (BOOLEAN_VALUE_SIGNATURE.equals(signature)) {
             Object value = dvmObject.getValue();
             if (value instanceof Boolean b) {
                 return b;
@@ -449,22 +266,15 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
             log.debug("resolve ==> {}", pathname);
         }
 
-        // 处理libmetasec_ml.so文件
         if (pathname.contains("libmetasec_ml.so")) {
-            return FileResult.success(new SimpleFileIO(oflags, tempSoMetasecMlFile, pathname));
+            return openVirtualFile(oflags, soMetasecMlFile, pathname);
         }
-
-        // 处理APK文件
-        if (pathname.equals(APK_INSTALL_PATH)) {
-            return FileResult.success(new SimpleFileIO(oflags, tempApkFile, pathname));
+        if (APK_INSTALL_PATH.equals(pathname)) {
+            return openVirtualFile(oflags, apkFile, pathname);
         }
-
         return null;
     }
 
-    /**
-     * 释放资源
-     */
     public void destroy() {
         lifecycleLock.lock();
         try {
@@ -472,51 +282,251 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
                 return;
             }
             destroyed = true;
-            try {
-                emulator.close();
-                log.info("资源已释放");
-            } catch (Exception e) {
-                log.error("关闭模拟器失败", e);
-            }
+            closeEmulator(emulator, "关闭模拟器失败");
+            log.info("资源已释放");
         } finally {
             lifecycleLock.unlock();
         }
 
-        // 高频 reset 时 rootfs 目录会在 /tmp 迅速累积；这里主动清理，避免容器磁盘被占满。
-        try {
-            deleteRecursively(tempRootfsDir);
-        } catch (Exception e) {
-            if (loggable) {
-                log.debug("清理临时 rootfs 目录失败: {}", tempRootfsDir != null ? tempRootfsDir.getAbsolutePath() : null, e);
-            }
-        } finally {
-            tempRootfsDir = null;
-        }
+        cleanupRootfs(rootfsDir, "清理临时 rootfs 目录失败");
     }
 
-    private void cleanupAfterInitFailure(AndroidEmulator emulatorCandidate) {
-        if (emulatorCandidate != null) {
-            try {
-                emulatorCandidate.close();
-            } catch (Exception closeError) {
+    private ResolvedResources resolveResources(String apkPath, String resourceRoot) throws IOException {
+        Path resourceBasePath = resolveResourceRoot(resourceRoot);
+        File resolvedApkFile = resolveApkFile(apkPath, resourceBasePath);
+        File resolvedSoMetasecFile = resolveBundledResourceFile(resourceBasePath, SO_METASEC_ML_PATH);
+        File resolvedSoCShareFile = resolveBundledResourceFile(resourceBasePath, SO_C_SHARE_PATH);
+        File resolvedMsCertFile = resolveBundledResourceFile(resourceBasePath, MS_CERT_FILE_PATH);
+        byte[] resolvedMsCertData = Files.readAllBytes(resolvedMsCertFile.toPath());
+        File resolvedRootfsDir = createPreparedRootfs();
+
+        return new ResolvedResources(
+            resolvedApkFile,
+            resolvedSoMetasecFile,
+            resolvedSoCShareFile,
+            resolvedRootfsDir,
+            resolvedMsCertData
+        );
+    }
+
+    private AndroidEmulator createEmulator(File rootfsDir) {
+        AndroidEmulator emulator = AndroidEmulatorBuilder
+            .for64Bit()
+            .setRootDir(rootfsDir)
+            .setProcessName(PACKAGE_NAME)
+            .addBackendFactory(new Unicorn2Factory(true))
+            .build();
+
+        Map<String, Integer> inode = new LinkedHashMap<>();
+        inode.put("/data/system", 671745);
+        inode.put("/data/app", 327681);
+        inode.put("/sdcard/android", 294915);
+        inode.put(DATA_USER_DIR, 655781);
+        inode.put(DATA_FILES_DIR, 655864);
+        emulator.set("inode", inode);
+        emulator.set("uid", APP_UID);
+
+        SyscallHandler<AndroidFileIO> handler = emulator.getSyscallHandler();
+        handler.setVerbose(false);
+        handler.addIOResolver(this);
+
+        return emulator;
+    }
+
+    private VM createVm(AndroidEmulator emulator) {
+        Memory emulatorMemory = emulator.getMemory();
+        emulatorMemory.setLibraryResolver(new AndroidResolver(SDK_VERSION));
+
+        VM vm = emulator.createDalvikVM();
+        vm.setJni(this);
+        vm.setVerbose(loggable);
+
+        new AndroidModule(emulator, vm).register(emulatorMemory);
+        new JniGraphics(emulator, vm).register(emulatorMemory);
+        return vm;
+    }
+
+    private Module loadMainModule(AndroidEmulator emulator, VM vm) {
+        vm.loadLibrary(soCShareFile, false);
+
+        DvmClass bridgeClass = vm.resolveClass("ms/bd/c/m");
+        DvmClass a4a = vm.resolveClass("ms/bd/c/a4$a", bridgeClass);
+        vm.resolveClass("com/bytedance/mobsec/metasec/ml/MS", a4a);
+
+        DalvikModule dalvikModule = vm.loadLibrary(soMetasecMlFile, true);
+        dalvikModule.callJNI_OnLoad(emulator);
+        return dalvikModule.getModule();
+    }
+
+    private UnidbgPointer invokeSignFunction(String url, String header) {
+        Number number = module.callFunction(emulator, SIGN_FUNCTION_OFFSET, url, header);
+        if (number == null) {
+            log.error("调用 native 签名函数失败，返回结果为 null");
+            return null;
+        }
+
+        UnidbgPointer result = memory.pointer(number.longValue());
+        if (result == null) {
+            log.error("获取签名结果指针失败");
+            return null;
+        }
+        return result;
+    }
+
+    private DvmObject<?> handleMSMethod(BaseVM vm, int methodId) {
+        return switch (methodId) {
+            case MS_METHOD_DATA_PATH -> new StringObject(vm, MSDATA_VFS_PATH);
+            case MS_METHOD_BOOL_1, MS_METHOD_BOOL_2 -> DvmBoolean.valueOf(vm, true);
+            case MS_METHOD_VERSION_CODE -> vm.resolveClass("java.lang.Integer").newObject(APP_VERSION_CODE);
+            case MS_METHOD_VERSION_NAME -> new StringObject(vm, "6.8.1.32");
+            case MS_METHOD_CERT -> certificateBytes(vm);
+            case MS_METHOD_NOW_MS -> vm.resolveClass("java/lang/Long").newObject(System.currentTimeMillis());
+            default -> {
                 if (loggable) {
-                    log.debug("初始化失败后关闭模拟器失败", closeError);
+                    log.debug("未处理的 MS 方法 ID: {}", methodId);
                 }
+                yield null;
             }
+        };
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private DvmObject<?> buildStackTraceArray(BaseVM vm) {
+        StackTraceElement[] elements = Thread.currentThread().getStackTrace();
+        DvmObject<?>[] objects = (DvmObject<?>[]) new DvmObject[elements.length];
+        for (int i = 0; i < elements.length; i++) {
+            objects[i] = vm.resolveClass("java/lang/StackTraceElement").newObject(elements[i]);
+        }
+        return new ArrayObject(objects);
+    }
+
+    private DvmObject<?> certificateBytes(BaseVM vm) {
+        if (loggable) {
+            log.debug("成功读取证书文件: {} bytes", msCertData.length);
+        }
+        return new ByteArray(vm, msCertData);
+    }
+
+    private static FileResult openVirtualFile(int oflags, File file, String pathname) {
+        return FileResult.success(new SimpleFileIO(oflags, file, pathname));
+    }
+
+    private static Path resolveResourceRoot(String resourceRoot) throws IOException {
+        String normalizedRoot = trimToNull(resourceRoot);
+        if (normalizedRoot == null) {
+            throw new IOException("未配置 UNIDBG_RESOURCE_ROOT");
         }
 
-        try {
-            deleteRecursively(tempRootfsDir);
-        } catch (Exception cleanupError) {
-            if (loggable) {
-                log.debug("初始化失败后清理临时 rootfs 目录失败", cleanupError);
+        Path basePath = Path.of(normalizedRoot).toAbsolutePath().normalize();
+        if (!Files.exists(basePath) || !Files.isDirectory(basePath)) {
+            throw new IOException("资源目录不存在: " + basePath);
+        }
+        return basePath;
+    }
+
+    private static File resolveApkFile(String apkPath, Path resourceBasePath) throws IOException {
+        String configuredApkPath = trimToNull(apkPath);
+        if (configuredApkPath != null) {
+            File file = new File(configuredApkPath);
+            if (!file.exists() || !file.isFile()) {
+                throw new IOException("APK 文件不存在: " + file.getAbsolutePath());
             }
-        } finally {
-            tempRootfsDir = null;
+            return file;
+        }
+
+        return resolveBundledResourceFile(resourceBasePath, DEFAULT_APK_RESOURCE_PATH);
+    }
+
+    private static File resolveBundledResourceFile(Path resourceBasePath, String relativePath) throws IOException {
+        Path filePath = resourceBasePath.resolve(relativePath).normalize();
+        if (!filePath.startsWith(resourceBasePath)) {
+            throw new IOException("资源路径非法: " + relativePath);
+        }
+        File file = filePath.toFile();
+        if (!file.exists() || !file.isFile()) {
+            throw new IOException("资源文件不存在: " + file.getAbsolutePath());
+        }
+        return file;
+    }
+
+    private static File createPreparedRootfs() throws IOException {
+        File rootfsDir = Files.createTempDirectory("fq_rootfs").toFile();
+        try {
+            prepareRootfs(rootfsDir.toPath());
+            return rootfsDir;
+        } catch (IOException e) {
+            deleteRecursively(rootfsDir);
+            throw e;
         }
     }
 
-    private void deleteRecursively(File file) {
+    private static void prepareRootfs(Path rootfs) throws IOException {
+        Path msDataDir = rootfs.resolve("data/user/0/" + PACKAGE_NAME + "/files");
+        Files.createDirectories(msDataDir);
+
+        Path msDataFile = msDataDir.resolve(".msdata");
+        if (!Files.exists(msDataFile)) {
+            Files.createFile(msDataFile);
+        }
+
+        Files.createDirectories(rootfs.resolve("data/system"));
+        Files.createDirectories(rootfs.resolve("data/app"));
+        Files.createDirectories(rootfs.resolve("sdcard/android"));
+    }
+
+    private void logResolvedResources() {
+        if (!loggable) {
+            return;
+        }
+
+        log.debug("APK 文件: {}", apkFile.getAbsolutePath());
+        log.debug("SO 主文件: {}", soMetasecMlFile.getAbsolutePath());
+        log.debug("SO 共享库文件: {}", soCShareFile.getAbsolutePath());
+        log.debug("证书缓存字节数: {}", msCertData.length);
+        log.debug("rootfs 目录: {}", rootfsDir.getAbsolutePath());
+    }
+
+    private void cleanupAfterInitFailure(AndroidEmulator emulatorCandidate, ResolvedResources resources) {
+        closeEmulator(emulatorCandidate, "初始化失败后关闭模拟器失败");
+        if (resources != null) {
+            cleanupRootfs(resources.rootfsDir(), "初始化失败后清理临时 rootfs 目录失败");
+        }
+    }
+
+    private void closeEmulator(AndroidEmulator emulatorCandidate, String message) {
+        if (emulatorCandidate == null) {
+            return;
+        }
+        try {
+            emulatorCandidate.close();
+        } catch (Exception error) {
+            if (loggable) {
+                log.debug(message, error);
+            } else {
+                log.error(message, error);
+            }
+        }
+    }
+
+    private void cleanupRootfs(File targetRootfsDir, String debugMessage) {
+        try {
+            deleteRecursively(targetRootfsDir);
+        } catch (Exception error) {
+            if (loggable) {
+                log.debug(debugMessage + ": {}", targetRootfsDir != null ? targetRootfsDir.getAbsolutePath() : null, error);
+            }
+        }
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static void deleteRecursively(File file) {
         if (file == null || !file.exists()) {
             return;
         }
@@ -533,5 +543,14 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
         } catch (Exception ignored) {
             // ignore
         }
+    }
+
+    private record ResolvedResources(
+        File apkFile,
+        File soMetasecMlFile,
+        File soCShareFile,
+        File rootfsDir,
+        byte[] msCertData
+    ) {
     }
 }
