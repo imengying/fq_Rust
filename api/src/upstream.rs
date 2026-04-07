@@ -1,5 +1,6 @@
 use crate::config::DeviceProfile;
 use crate::content::{decrypt_and_decompress_content, extract_text, extract_title};
+use crate::encoding::decode_upstream_response;
 use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{
     BookInfo, BookItem, ChapterInfo, DirectoryItemData, DirectoryResponse, SearchResponse,
@@ -440,12 +441,24 @@ async fn execute_signed_json_get(
         .map_err(|error| ServiceError::internal(format!("上游请求失败: {error}")))?;
 
     let status = response.status();
+    let content_encoding = response
+        .headers()
+        .get(reqwest::header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let body = response
-        .text()
+        .bytes()
         .await
         .map_err(|error| ServiceError::internal(format!("上游响应读取失败: {error}")))?;
-    if body.trim().is_empty() {
-        return Err(ServiceError::internal("上游返回空响应"));
+    let body_text = decode_upstream_response(body.as_ref(), content_encoding.as_deref())
+        .map_err(|error| ServiceError::internal(format!("上游响应解码失败: {error}")))?;
+    let trimmed_body = body_text.trim();
+    if trimmed_body.is_empty() {
+        return Err(ServiceError::internal(format!(
+            "上游返回空响应: status={}, bytes={}",
+            status.as_u16(),
+            body.len()
+        )));
     }
     if !status.is_success() {
         return Err(ServiceError::internal(format!(
@@ -454,7 +467,17 @@ async fn execute_signed_json_get(
         )));
     }
 
-    let parsed = serde_json::from_str(&body)
+    if !trimmed_body.starts_with('{') && !trimmed_body.starts_with('[') {
+        if contains_illegal_access(trimmed_body) {
+            return Err(ServiceError::new(110, "ILLEGAL_ACCESS"));
+        }
+        return Err(ServiceError::internal(format!(
+            "上游返回非JSON响应: {}",
+            truncate_for_log(trimmed_body, 240)
+        )));
+    }
+
+    let parsed = serde_json::from_str(&body_text)
         .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))?;
     state.record_success();
     Ok(parsed)
@@ -980,6 +1003,18 @@ fn should_rotate_after_error(error: &ServiceError) -> bool {
     uppercase.contains("ILLEGAL_ACCESS")
 }
 
+fn contains_illegal_access(value: &str) -> bool {
+    value.to_ascii_uppercase().contains("ILLEGAL_ACCESS")
+}
+
+fn truncate_for_log(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        value.to_string()
+    } else {
+        format!("{}...", &value[..max_len])
+    }
+}
+
 async fn probe_current_device(state: &AppState) -> bool {
     let mut request = SearchUpstreamRequest::new("系统".to_string(), 0, 1, 1, None);
     request.is_first_enter_search = true;
@@ -1034,7 +1069,6 @@ struct BatchFullResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ItemContent {
-    code: Option<i64>,
     title: Option<String>,
     content: Option<String>,
     #[serde(rename = "novel_data")]

@@ -2,6 +2,7 @@ use crate::models::ChapterInfo;
 use anyhow::Result;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, Row};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct PgChapterCache {
@@ -13,7 +14,8 @@ pub struct PgChapterCache {
 impl PgChapterCache {
     pub async fn new(database_url: &str, table_name: &str, ttl_ms: u64) -> Result<Self> {
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(3)
+            .acquire_timeout(Duration::from_secs(5))
             .connect(database_url)
             .await?;
 

@@ -1,5 +1,5 @@
 use crate::config::{DeviceProfile, UpstreamConfig};
-use crate::encoding::{decode_gzip_or_utf8, decode_hex_16};
+use crate::encoding::{decode_hex_16, decode_upstream_response};
 use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{ServiceError, ServiceResult};
 use crate::signer::SignerClient;
@@ -31,9 +31,7 @@ pub struct RegisterKeyService {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegisterKeyResolveResult {
     pub device_fingerprint: String,
-    pub keyver: i64,
     pub real_key_hex: String,
-    pub expires_at_ms: i64,
     pub source: String,
 }
 
@@ -93,9 +91,7 @@ impl RegisterKeyService {
         let expires_at_ms = compute_expires_at_ms(self.cache_ttl_ms);
         let result = RegisterKeyResolveResult {
             device_fingerprint: fingerprint.clone(),
-            keyver: fetched.keyver,
             real_key_hex: fetched.real_key_hex,
-            expires_at_ms,
             source: "refresh".to_string(),
         };
         let key = cache_key(&fingerprint, fetched.keyver);
@@ -210,11 +206,16 @@ async fn fetch_register_key(
         .map_err(|error| ServiceError::internal(format!("registerkey upstream 请求失败: {error}")))?;
 
     let status = response.status();
+    let content_encoding = response
+        .headers()
+        .get(reqwest::header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let body = response
         .bytes()
         .await
         .map_err(|error| ServiceError::internal(format!("registerkey upstream 响应读取失败: {error}")))?;
-    let response_body = decode_gzip_or_utf8(body.as_ref())
+    let response_body = decode_upstream_response(body.as_ref(), content_encoding.as_deref())
         .map_err(|error| ServiceError::internal(format!("registerkey upstream 解压失败: {error}")))?;
 
     if response_body.trim().is_empty() {

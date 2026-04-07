@@ -24,7 +24,7 @@ pub fn decode_hex_16(input: &str) -> Result<Vec<u8>> {
 }
 
 pub fn decode_gzip_or_utf8(raw: &[u8]) -> Result<String> {
-    if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
+    if looks_like_gzip(raw) {
         let mut decoder = GzDecoder::new(raw);
         let mut output = String::new();
         decoder.read_to_string(&mut output)?;
@@ -32,4 +32,23 @@ pub fn decode_gzip_or_utf8(raw: &[u8]) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(raw).to_string())
+}
+
+pub fn decode_upstream_response(raw: &[u8], content_encoding: Option<&str>) -> Result<String> {
+    let header_declares_gzip = content_encoding
+        .map(|value| value.to_ascii_lowercase().contains("gzip"))
+        .unwrap_or(false);
+
+    if header_declares_gzip || looks_like_gzip(raw) {
+        match decode_gzip_or_utf8(raw) {
+            Ok(value) => return Ok(value),
+            Err(_) => return Ok(String::from_utf8_lossy(raw).to_string()),
+        }
+    }
+
+    Ok(String::from_utf8_lossy(raw).to_string())
+}
+
+fn looks_like_gzip(raw: &[u8]) -> bool {
+    raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b
 }

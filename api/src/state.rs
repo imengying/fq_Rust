@@ -9,6 +9,7 @@ use crate::signer::SignerClient;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::warn;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -57,14 +58,19 @@ impl AppState {
             .map(|value| value.trim())
             .filter(|value| !value.is_empty())
         {
-            Some(
-                PgChapterCache::new(
-                    database_url,
-                    &config.fq.cache.postgres_table,
-                    config.fq.cache.chapter_ttl_ms,
-                )
-                .await?,
+            match PgChapterCache::new(
+                database_url,
+                &config.fq.cache.postgres_table,
+                config.fq.cache.chapter_ttl_ms,
             )
+            .await
+            {
+                Ok(cache) => Some(cache),
+                Err(error) => {
+                    warn!("postgres chapter cache disabled: {error}");
+                    None
+                }
+            }
         } else {
             None
         };
