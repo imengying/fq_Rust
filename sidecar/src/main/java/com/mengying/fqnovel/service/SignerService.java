@@ -1,12 +1,10 @@
 package com.mengying.fqnovel.service;
 
 import com.mengying.fqnovel.dto.SignResult;
-import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Service
 public class SignerService {
 
     private final FQEncryptServiceWorker worker;
@@ -36,4 +34,3 @@ public class SignerService {
         return FQEncryptServiceWorker.requestGlobalReset(reason);
     }
 }
-

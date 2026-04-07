@@ -4,16 +4,12 @@ import com.mengying.fqnovel.config.UnidbgProperties;
 import com.mengying.fqnovel.utils.ProcessLifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PreDestroy;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-@Service("fqEncryptWorker")
 public class FQEncryptServiceWorker {
 
     private static final Logger log = LoggerFactory.getLogger(FQEncryptServiceWorker.class);
@@ -27,7 +23,6 @@ public class FQEncryptServiceWorker {
     private final FQEncryptService signer;
     private long localResetEpoch = 0L;
 
-    @Autowired
     public FQEncryptServiceWorker(UnidbgProperties unidbgProperties) {
         UnidbgProperties properties = Objects.requireNonNull(unidbgProperties, "unidbgProperties must not be null");
         RESET_COOLDOWN_MS = Math.max(0L, properties.getResetCooldownMs());
@@ -112,7 +107,6 @@ public class FQEncryptServiceWorker {
         localResetEpoch = epoch;
     }
 
-    @PreDestroy
     public void destroy() {
         try {
             signer.destroy();

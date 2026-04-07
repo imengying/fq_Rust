@@ -1,8 +1,5 @@
 package com.mengying.fqnovel.config;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
-@ConfigurationProperties(prefix = "fq.upstream")
 public class SidecarUpstreamProperties {
 
     private String baseUrl = "https://api5-normal-sinfonlineb.fqnovel.com";
@@ -50,5 +47,30 @@ public class SidecarUpstreamProperties {
     public void setReadTimeoutMs(long readTimeoutMs) {
         this.readTimeoutMs = readTimeoutMs;
     }
-}
 
+    public static SidecarUpstreamProperties fromEnv() {
+        SidecarUpstreamProperties properties = new SidecarUpstreamProperties();
+        properties.setBaseUrl(stringEnv("FQ_UPSTREAM_BASE_URL", properties.getBaseUrl()));
+        properties.setRegisterKeyCacheTtlMs(longEnv("REGISTER_KEY_CACHE_TTL_MS", properties.getRegisterKeyCacheTtlMs()));
+        properties.setRegisterKeyCacheMaxEntries((int) longEnv("REGISTER_KEY_CACHE_MAX_ENTRIES", properties.getRegisterKeyCacheMaxEntries()));
+        properties.setConnectTimeoutMs(longEnv("FQ_UPSTREAM_CONNECT_TIMEOUT_MS", properties.getConnectTimeoutMs()));
+        properties.setReadTimeoutMs(longEnv("FQ_UPSTREAM_READ_TIMEOUT_MS", properties.getReadTimeoutMs()));
+        return properties;
+    }
+
+    private static String stringEnv(String key, String defaultValue) {
+        String value = System.getenv(key);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        return value.trim();
+    }
+
+    private static long longEnv(String key, long defaultValue) {
+        try {
+            return Long.parseLong(System.getenv().getOrDefault(key, String.valueOf(defaultValue)).trim());
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+}

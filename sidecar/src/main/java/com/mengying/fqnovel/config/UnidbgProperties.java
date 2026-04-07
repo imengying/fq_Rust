@@ -1,14 +1,11 @@
 package com.mengying.fqnovel.config;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
 /**
  * unidbg配置类
  *
  * @author AnJia
  * @since 2021-07-26 19:13
  */
-@ConfigurationProperties(prefix = "application.unidbg")
 public class UnidbgProperties {
     /**
      * 是否打印调用信息
@@ -81,5 +78,34 @@ public class UnidbgProperties {
 
     public void setApkClasspath(String apkClasspath) {
         this.apkClasspath = apkClasspath;
+    }
+
+    public static UnidbgProperties fromEnv() {
+        UnidbgProperties properties = new UnidbgProperties();
+        properties.setVerbose(Boolean.parseBoolean(System.getenv().getOrDefault("UNIDBG_VERBOSE", "false")));
+        properties.setResetCooldownMs(parseLong("SIGNER_RESET_COOLDOWN_MS", 2000L));
+        properties.setUpstreamEmptyResetCooldownMs(parseLong("SIGNER_UPSTREAM_EMPTY_RESET_COOLDOWN_MS", 8000L));
+        properties.setApkPath(trimToNull(System.getenv("UNIDBG_APK_PATH")));
+        properties.setApkClasspath(trimToNull(System.getenv("UNIDBG_APK_CLASSPATH")));
+        if (properties.getApkClasspath() == null) {
+            properties.setApkClasspath("com/dragon/read/oversea/gp/apk/base.apk");
+        }
+        return properties;
+    }
+
+    private static long parseLong(String key, long defaultValue) {
+        try {
+            return Long.parseLong(System.getenv().getOrDefault(key, String.valueOf(defaultValue)).trim());
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

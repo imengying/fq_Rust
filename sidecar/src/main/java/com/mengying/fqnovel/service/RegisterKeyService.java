@@ -3,7 +3,6 @@ package com.mengying.fqnovel.service;
 import com.mengying.fqnovel.config.SidecarUpstreamProperties;
 import com.mengying.fqnovel.dto.DeviceProfile;
 import com.mengying.fqnovel.dto.RegisterKeyResolveResult;
-import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -11,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Service
 public class RegisterKeyService {
 
     private final RegisterKeyUpstreamClient upstreamClient;

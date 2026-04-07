@@ -2,7 +2,5 @@ services:
   fq-rust:
     build:
       context: .
-    environment:
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-me-in-production}
     ports:
       - "9999:9999"

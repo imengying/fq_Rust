@@ -26,22 +26,13 @@ impl AppState {
             .timeout(Duration::from_millis(config.fq.upstream.read_timeout_ms))
             .build()?;
 
-        let sidecar_http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_millis(config.fq.sidecar.timeout_ms))
-            .timeout(Duration::from_millis(config.fq.sidecar.timeout_ms))
-            .build()?;
-
         let search_ttl = duration_from_ms(config.fq.cache.search_ttl_ms);
         let directory_ttl = duration_from_ms(config.fq.cache.directory_ttl_ms);
         let chapter_ttl = duration_from_ms(config.fq.cache.chapter_ttl_ms);
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
-            sidecar_client: SidecarClient::new(
-                sidecar_http,
-                config.fq.sidecar.base_url.clone(),
-                config.fq.sidecar.internal_token.clone(),
-            ),
+            sidecar_client: SidecarClient::new(config.fq.sidecar.command.clone())?,
             http_client,
             search_cache: TtlCache::new(search_ttl),
             directory_cache: TtlCache::new(directory_ttl),

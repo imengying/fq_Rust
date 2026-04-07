@@ -1,30 +1,28 @@
 package com.mengying.fqnovel.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mengying.fqnovel.config.SidecarUpstreamProperties;
 import com.mengying.fqnovel.dto.DeviceProfile;
 import com.mengying.fqnovel.dto.FqRegisterKeyPayload;
 import com.mengying.fqnovel.dto.FqRegisterKeyResponse;
 import com.mengying.fqnovel.dto.SignResult;
 import com.mengying.fqnovel.utils.CookieUtils;
+import com.mengying.fqnovel.utils.GzipUtils;
 import com.mengying.fqnovel.utils.Texts;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-@Component
 public class RegisterKeyUpstreamClient {
 
     private static final String REGISTER_KEY_PATH = "/reading/crypt/registerkey";
@@ -32,19 +30,20 @@ public class RegisterKeyUpstreamClient {
 
     private final SidecarUpstreamProperties properties;
     private final SignerService signerService;
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
 
     public RegisterKeyUpstreamClient(
         SidecarUpstreamProperties properties,
         SignerService signerService,
-        RestTemplate restTemplate,
         ObjectMapper objectMapper
     ) {
         this.properties = properties;
         this.signerService = signerService;
-        this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(Math.max(1000L, properties.getConnectTimeoutMs())))
+            .build();
     }
 
     public FetchedRegisterKey fetch(DeviceProfile profile) throws Exception {
@@ -54,10 +53,10 @@ public class RegisterKeyUpstreamClient {
         Map<String, String> headers = buildRegisterKeyHeaders(profile, currentTime);
         SignResult signed = signerService.sign(fullUrl, headers);
 
-        HttpHeaders httpHeaders = new HttpHeaders();
-        headers.forEach(httpHeaders::set);
-        signed.headers().forEach(httpHeaders::set);
-        httpHeaders.setContentType(MediaType.APPLICATION_JSON);
+        Map<String, String> httpHeaders = new LinkedHashMap<>();
+        headers.forEach(httpHeaders::put);
+        signed.headers().forEach(httpHeaders::put);
+        httpHeaders.put("content-type", "application/json");
 
         String serverDeviceId = profile.device() == null ? null : profile.device().deviceId();
         FqCrypto crypto = new FqCrypto(FqCrypto.REG_KEY);
@@ -66,28 +65,32 @@ public class RegisterKeyUpstreamClient {
             1L
         );
 
-        HttpEntity<FqRegisterKeyPayload> entity = new HttpEntity<>(payload, httpHeaders);
-        String responseBody = restTemplate.exchange(
-            URI.create(fullUrl),
-            HttpMethod.POST,
-            entity,
-            String.class
-        ).getBody();
+        String payloadJson = objectMapper.writeValueAsString(payload);
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(fullUrl))
+            .timeout(Duration.ofMillis(Math.max(1000L, properties.getReadTimeoutMs())))
+            .POST(HttpRequest.BodyPublishers.ofString(payloadJson));
+        httpHeaders.forEach(requestBuilder::header);
+
+        HttpResponse<byte[]> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        String responseBody = GzipUtils.decompressGzipResponse(response.body());
 
         if (!Texts.hasText(responseBody)) {
             throw new IllegalStateException("registerkey upstream 返回空响应");
         }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("registerkey upstream HTTP状态异常: " + response.statusCode());
+        }
 
-        FqRegisterKeyResponse response = objectMapper.readValue(responseBody, FqRegisterKeyResponse.class);
-        if (response == null || response.data() == null || !Texts.hasText(response.data().key())) {
+        FqRegisterKeyResponse parsed = objectMapper.readValue(responseBody, FqRegisterKeyResponse.class);
+        if (parsed == null || parsed.data() == null || !Texts.hasText(parsed.data().key())) {
             throw new IllegalStateException("registerkey upstream 返回无效数据");
         }
-        if (response.code() != 0L) {
-            throw new IllegalStateException("registerkey upstream 失败: " + response.message());
+        if (parsed.code() != 0L) {
+            throw new IllegalStateException("registerkey upstream 失败: " + parsed.message());
         }
 
-        long keyver = response.data().keyver();
-        String realKeyHex = FqCrypto.getRealKey(response.data().key());
+        long keyver = parsed.data().keyver();
+        String realKeyHex = FqCrypto.getRealKey(parsed.data().key());
         return new FetchedRegisterKey(keyver, realKeyHex);
     }
 

@@ -9,9 +9,11 @@ fq:
     connect_timeout_ms: 15000
     read_timeout_ms: 30000
   sidecar:
-    base_url: http://127.0.0.1:18080
-    internal_token: change-me-in-production
-    timeout_ms: 10000
+    command:
+      - java
+      - --enable-native-access=ALL-UNNAMED
+      - -jar
+      - /app/fq-sidecar.jar
   cache:
     search_ttl_ms: 45000
     directory_ttl_ms: 600000
@@ -39,4 +41,3 @@ fq:
       version_name: "6.8.1.32"
       os_version: "13"
       os_api: "33"
-

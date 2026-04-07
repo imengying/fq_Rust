@@ -40,9 +40,7 @@ pub struct UpstreamConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidecarConfig {
-    pub base_url: String,
-    pub internal_token: String,
-    pub timeout_ms: u64,
+    pub command: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -133,9 +131,12 @@ impl Default for UpstreamConfig {
 impl Default for SidecarConfig {
     fn default() -> Self {
         Self {
-            base_url: "http://127.0.0.1:18080".to_string(),
-            internal_token: "change-me-in-production".to_string(),
-            timeout_ms: 10_000,
+            command: vec![
+                "java".to_string(),
+                "--enable-native-access=ALL-UNNAMED".to_string(),
+                "-jar".to_string(),
+                "/app/fq-sidecar.jar".to_string(),
+            ],
         }
     }
 }
@@ -216,20 +217,15 @@ impl AppConfig {
             &mut self.fq.upstream.read_timeout_ms,
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
-        set_string(&mut self.fq.sidecar.base_url, "FQRS_SIDECAR_BASE_URL");
-        set_string(
-            &mut self.fq.sidecar.internal_token,
-            "FQRS_SIDECAR_INTERNAL_TOKEN",
-        );
-        set_u64(&mut self.fq.sidecar.timeout_ms, "FQRS_SIDECAR_TIMEOUT_MS");
+        set_command(&mut self.fq.sidecar.command, "FQRS_SIDECAR_COMMAND");
     }
 
     fn validate(&self) -> Result<()> {
         if self.server.port == 0 {
             return Err(anyhow!("server.port 不能为空"));
         }
-        if self.fq.sidecar.internal_token.trim().is_empty() {
-            return Err(anyhow!("fq.sidecar.internal_token 不能为空"));
+        if self.fq.sidecar.command.is_empty() {
+            return Err(anyhow!("fq.sidecar.command 不能为空"));
         }
         if self.fq.device_profile.device.device_id.trim().is_empty() {
             return Err(anyhow!("fq.device_profile.device.device_id 不能为空"));
@@ -303,3 +299,15 @@ fn set_u16(target: &mut u16, key: &str) {
     }
 }
 
+fn set_command(target: &mut Vec<String>, key: &str) {
+    if let Ok(value) = env::var(key) {
+        let parsed: Vec<String> = value
+            .split_whitespace()
+            .filter(|item| !item.trim().is_empty())
+            .map(ToString::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            *target = parsed;
+        }
+    }
+}

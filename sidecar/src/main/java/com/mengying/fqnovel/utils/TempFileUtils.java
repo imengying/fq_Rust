@@ -2,17 +2,15 @@ package com.mengying.fqnovel.utils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.util.DigestUtils;
-import org.springframework.util.StreamUtils;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.nio.charset.StandardCharsets;
 
 public final class TempFileUtils {
 
@@ -42,8 +40,10 @@ public final class TempFileUtils {
                 return cached;
             }
 
-            ClassPathResource resource = new ClassPathResource(normalizedPath);
-            if (!resource.exists()) {
+            InputStream inputStream = Thread.currentThread()
+                .getContextClassLoader()
+                .getResourceAsStream(normalizedPath);
+            if (inputStream == null) {
                 log.error("资源文件不存在: {}", normalizedPath);
                 return null;
             }
@@ -56,9 +56,9 @@ public final class TempFileUtils {
             tempFile.deleteOnExit();
 
             // 复制资源到临时文件
-            try (InputStream is = resource.getInputStream();
+            try (InputStream is = inputStream;
                  FileOutputStream fos = new FileOutputStream(tempFile)) {
-                StreamUtils.copy(is, fos);
+                is.transferTo(fos);
             }
 
             TEMP_FILES.put(cacheKey, tempFile);
@@ -81,7 +81,17 @@ public final class TempFileUtils {
     }
 
     private static String md5Key(String path) {
-        return DigestUtils.md5DigestAsHex(path.getBytes(StandardCharsets.UTF_8));
+        try {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            byte[] hashed = digest.digest(path.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            for (byte value : hashed) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("计算缓存键失败", e);
+        }
     }
 
     private static String fileExtensionOf(String path) {
