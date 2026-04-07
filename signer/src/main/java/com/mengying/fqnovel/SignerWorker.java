@@ -1,9 +1,9 @@
 package com.mengying.fqnovel;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mengying.fqnovel.config.UnidbgProperties;
-import com.mengying.fqnovel.dto.*;
 import com.mengying.fqnovel.unidbg.IdleFQ;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,11 +24,13 @@ public final class SignerWorker {
     }
 
     public static void main(String[] args) throws Exception {
-        UnidbgProperties unidbgProperties = UnidbgProperties.fromEnv();
         IdleFQ signer = new IdleFQ(
-            unidbgProperties.isVerbose(),
-            unidbgProperties.getApkPath(),
-            unidbgProperties.getApkClasspath()
+            Boolean.parseBoolean(System.getenv().getOrDefault("UNIDBG_VERBOSE", "false")),
+            trimToNull(System.getenv("UNIDBG_APK_PATH")),
+            defaultIfNull(
+                trimToNull(System.getenv("UNIDBG_APK_CLASSPATH")),
+                "com/dragon/read/oversea/gp/apk/base.apk"
+            )
         );
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -99,5 +101,53 @@ public final class SignerWorker {
             return WorkerResponse.error(requestId, 1003, "signer unavailable");
         }
         return WorkerResponse.success(requestId, new SignResult(raw));
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String defaultIfNull(String value, String defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private record WorkerRequest(
+        String id,
+        String method,
+        JsonNode params
+    ) {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record WorkerResponse<T>(
+        String id,
+        int code,
+        String message,
+        T data,
+        long serverTime
+    ) {
+
+        private static <T> WorkerResponse<T> success(String id, T data) {
+            return new WorkerResponse<>(id, 0, "success", data, System.currentTimeMillis());
+        }
+
+        private static <T> WorkerResponse<T> error(String id, int code, String message) {
+            return new WorkerResponse<>(id, code, message, null, System.currentTimeMillis());
+        }
+    }
+
+    private record SignResult(
+        String raw
+    ) {
+    }
+
+    private record SignRequest(
+        String url,
+        @JsonProperty("headers_text") String headersText
+    ) {
     }
 }

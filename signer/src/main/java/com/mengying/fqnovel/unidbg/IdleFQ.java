@@ -1,6 +1,5 @@
 package com.mengying.fqnovel.unidbg;
 
-import com.mengying.fqnovel.utils.Texts;
 import com.mengying.fqnovel.utils.TempFileUtils;
 import com.github.unidbg.AndroidEmulator;
 import com.github.unidbg.Emulator;
@@ -187,7 +186,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
     }
 
     private File resolveApkFile() throws IOException {
-        String configuredApkPath = Texts.trimToNull(apkPath);
+        String configuredApkPath = trimToNull(apkPath);
         if (configuredApkPath != null) {
             File apkFile = new File(configuredApkPath);
             if (!apkFile.exists() || !apkFile.isFile()) {
@@ -196,7 +195,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
             return apkFile;
         }
 
-        String configuredApkClasspath = Texts.trimToNull(apkClasspath);
+        String configuredApkClasspath = trimToNull(apkClasspath);
         if (configuredApkClasspath != null) {
             File classpathApk = TempFileUtils.getTempFile(configuredApkClasspath);
             if (classpathApk != null && classpathApk.exists()) {
@@ -218,6 +217,14 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
      */
     private File createTempDir(String prefix) throws IOException {
         return Files.createTempDirectory(prefix).toFile();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**

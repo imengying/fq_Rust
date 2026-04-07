@@ -29,7 +29,7 @@ public final class TempFileUtils {
      */
     public static synchronized File getTempFile(String classpathFile) {
         try {
-            String normalizedPath = Texts.trimToNull(classpathFile);
+            String normalizedPath = trimToNull(classpathFile);
             if (normalizedPath == null) {
                 return null;
             }
@@ -90,5 +90,13 @@ public final class TempFileUtils {
             return "";
         }
         return path.substring(dotIndex);
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
