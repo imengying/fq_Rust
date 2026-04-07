@@ -1,11 +1,17 @@
 *
+!Dockerfile
 !Cargo.toml
 !apps/
 !apps/api/
 !apps/api/Cargo.toml
-!apps/api/Dockerfile
 !apps/api/src/
 !apps/api/src/**
 !configs/
 !configs/api.example.yaml
+!sidecar/
+!sidecar/pom.xml
+!sidecar/src/
+!sidecar/src/**
+!scripts/
+!scripts/container-entrypoint.sh
 

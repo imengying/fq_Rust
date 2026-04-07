@@ -30,18 +30,6 @@ jobs:
   publish:
     if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service_name: api
-            image_name: fq-rust-api
-            context: .
-            dockerfile: ./apps/api/Dockerfile
-          - service_name: sidecar
-            image_name: fq-rust-sidecar
-            context: ./sidecar
-            dockerfile: ./sidecar/Dockerfile
 
     steps:
       - name: Checkout
@@ -89,7 +77,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5.10.0
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_name }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/fq-rust
           tags: |
             type=raw,value=latest,enable=${{ steps.vars.outputs.push_latest == 'true' }}
             type=ref,event=tag
@@ -98,8 +86,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6.18.0
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           cache-from: type=gha

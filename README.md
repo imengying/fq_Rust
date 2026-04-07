@@ -35,11 +35,13 @@ Rust 主服务 + Java signer sidecar 的番茄小说混合架构实现。
 
 ## Docker
 
-仓库带了：
+当前按单镜像方式部署：一个容器内同时运行 Rust API 和 Java sidecar。
 
+关键文件：
+
+- [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
+- [container-entrypoint.sh](/home/mengying/文档/code/fq_Rust/scripts/container-entrypoint.sh)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
-- [apps/api/Dockerfile](/home/mengying/文档/code/fq_Rust/apps/api/Dockerfile)
-- [sidecar/Dockerfile](/home/mengying/文档/code/fq_Rust/sidecar/Dockerfile)
 
 启动时只要把 `.env.example` 复制成 `.env` 并改 token，然后执行：
 
@@ -61,10 +63,9 @@ docker compose up --build
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 
-会推送两个多架构镜像：
+会推送一个多架构镜像：
 
-- `<DOCKERHUB_USERNAME>/fq-rust-api`
-- `<DOCKERHUB_USERNAME>/fq-rust-sidecar`
+- `<DOCKERHUB_USERNAME>/fq-rust`
 
 标签规则：
 

@@ -1,21 +1,8 @@
 services:
-  sidecar:
+  fq-rust:
     build:
-      context: ./sidecar
+      context: .
     environment:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-me-in-production}
     ports:
-      - "18080:18080"
-
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    depends_on:
-      - sidecar
-    environment:
-      FQRS_SIDECAR_BASE_URL: http://sidecar:18080
-      FQRS_SIDECAR_INTERNAL_TOKEN: ${INTERNAL_API_TOKEN:-change-me-in-production}
-    ports:
       - "9999:9999"
-
