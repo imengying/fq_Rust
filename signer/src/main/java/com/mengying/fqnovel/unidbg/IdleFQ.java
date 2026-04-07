@@ -105,6 +105,14 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         "android/app/Application->getApplicationInfo()Landroid/content/pm/ApplicationInfo;";
     private static final String LEGACY_APPLICATION_GET_APPLICATION_INFO_SIGNATURE =
         "Landroid/app/Application;->getApplicationInfo()Landroid/content/pm/ApplicationInfo;";
+    private static final String CONTEXT_GET_PACKAGE_CODE_PATH_SIGNATURE =
+        "android/content/Context->getPackageCodePath()Ljava/lang/String;";
+    private static final String CONTEXT_GET_PACKAGE_RESOURCE_PATH_SIGNATURE =
+        "android/content/Context->getPackageResourcePath()Ljava/lang/String;";
+    private static final String APPLICATION_GET_PACKAGE_CODE_PATH_SIGNATURE =
+        "android/app/Application->getPackageCodePath()Ljava/lang/String;";
+    private static final String APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE =
+        "android/app/Application->getPackageResourcePath()Ljava/lang/String;";
     private static final String FILE_GET_ABSOLUTE_PATH_SIGNATURE = "java/io/File->getAbsolutePath()Ljava/lang/String;";
     private static final String FILE_GET_PATH_SIGNATURE = "java/io/File->getPath()Ljava/lang/String;";
     private static final String LONG_VALUE_SIGNATURE = "java/lang/Long->longValue()J";
@@ -118,12 +126,32 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private static final String BUILD_VERSION_RELEASE_SIGNATURE = "android/os/Build$VERSION->RELEASE:Ljava/lang/String;";
     private static final String BUILD_VERSION_SDK_SIGNATURE = "android/os/Build$VERSION->SDK:Ljava/lang/String;";
     private static final String BUILD_VERSION_SDK_INT_SIGNATURE = "android/os/Build$VERSION->SDK_INT:I";
+    private static final String BUILD_BRAND_SIGNATURE = "android/os/Build->BRAND:Ljava/lang/String;";
+    private static final String BUILD_MANUFACTURER_SIGNATURE = "android/os/Build->MANUFACTURER:Ljava/lang/String;";
+    private static final String BUILD_MODEL_SIGNATURE = "android/os/Build->MODEL:Ljava/lang/String;";
+    private static final String BUILD_DEVICE_SIGNATURE = "android/os/Build->DEVICE:Ljava/lang/String;";
+    private static final String BUILD_PRODUCT_SIGNATURE = "android/os/Build->PRODUCT:Ljava/lang/String;";
+    private static final String BUILD_HARDWARE_SIGNATURE = "android/os/Build->HARDWARE:Ljava/lang/String;";
+    private static final String BUILD_CPU_ABI_SIGNATURE = "android/os/Build->CPU_ABI:Ljava/lang/String;";
+    private static final String BUILD_CPU_ABI2_SIGNATURE = "android/os/Build->CPU_ABI2:Ljava/lang/String;";
+    private static final String BUILD_SUPPORTED_ABIS_SIGNATURE = "android/os/Build->SUPPORTED_ABIS:[Ljava/lang/String;";
+    private static final String BUILD_SUPPORTED_64_BIT_ABIS_SIGNATURE =
+        "android/os/Build->SUPPORTED_64_BIT_ABIS:[Ljava/lang/String;";
+    private static final String BUILD_SUPPORTED_32_BIT_ABIS_SIGNATURE =
+        "android/os/Build->SUPPORTED_32_BIT_ABIS:[Ljava/lang/String;";
     private static final String APPLICATION_INFO_SOURCE_DIR_SIGNATURE =
         "android/content/pm/ApplicationInfo->sourceDir:Ljava/lang/String;";
     private static final String LEGACY_APPLICATION_INFO_SOURCE_DIR_SIGNATURE =
         "Landroid/content/pm/ApplicationInfo;->sourceDir:Ljava/lang/String;";
     private static final String ANDROID_RELEASE = "6.0";
     private static final String ANDROID_SDK = Integer.toString(SDK_VERSION);
+    private static final String DEVICE_BRAND = "Xiaomi";
+    private static final String DEVICE_MANUFACTURER = "Xiaomi";
+    private static final String DEVICE_MODEL = "Sirius";
+    private static final String DEVICE_NAME = "Sirius";
+    private static final String DEVICE_PRODUCT = "Sirius";
+    private static final String DEVICE_HARDWARE = "qcom";
+    private static final String DEVICE_CPU_ABI = "arm64-v8a";
 
     private final boolean loggable;
     private final AndroidEmulator emulator;
@@ -253,6 +281,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             case CONTEXT_GET_APPLICATION_INFO_SIGNATURE, APPLICATION_GET_APPLICATION_INFO_SIGNATURE,
                 LEGACY_APPLICATION_GET_APPLICATION_INFO_SIGNATURE ->
                 applicationInfoClass.newObject(null);
+            case CONTEXT_GET_PACKAGE_CODE_PATH_SIGNATURE, CONTEXT_GET_PACKAGE_RESOURCE_PATH_SIGNATURE,
+                APPLICATION_GET_PACKAGE_CODE_PATH_SIGNATURE, APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE ->
+                new StringObject(vm, apkFile.getAbsolutePath());
             case FILE_GET_ABSOLUTE_PATH_SIGNATURE, FILE_GET_PATH_SIGNATURE -> {
                 File file = (File) dvmObject.getValue();
                 yield new StringObject(vm, file.getAbsolutePath());
@@ -505,6 +536,14 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         return new ByteArray(vm, msCertData);
     }
 
+    private DvmObject<?> buildStringArray(VM vm, String... values) {
+        StringObject[] objects = new StringObject[values.length];
+        for (int i = 0; i < values.length; i++) {
+            objects[i] = new StringObject(vm, values[i]);
+        }
+        return new ArrayObject(objects);
+    }
+
     @Override
     public int getStaticIntField(BaseVM vm, DvmClass dvmClass, String signature) {
         if (loggable) {
@@ -527,6 +566,17 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         return switch (signature) {
             case BUILD_VERSION_RELEASE_SIGNATURE -> new StringObject(vm, ANDROID_RELEASE);
             case BUILD_VERSION_SDK_SIGNATURE -> new StringObject(vm, ANDROID_SDK);
+            case BUILD_BRAND_SIGNATURE -> new StringObject(vm, DEVICE_BRAND);
+            case BUILD_MANUFACTURER_SIGNATURE -> new StringObject(vm, DEVICE_MANUFACTURER);
+            case BUILD_MODEL_SIGNATURE -> new StringObject(vm, DEVICE_MODEL);
+            case BUILD_DEVICE_SIGNATURE -> new StringObject(vm, DEVICE_NAME);
+            case BUILD_PRODUCT_SIGNATURE -> new StringObject(vm, DEVICE_PRODUCT);
+            case BUILD_HARDWARE_SIGNATURE -> new StringObject(vm, DEVICE_HARDWARE);
+            case BUILD_CPU_ABI_SIGNATURE -> new StringObject(vm, DEVICE_CPU_ABI);
+            case BUILD_CPU_ABI2_SIGNATURE -> new StringObject(vm, "");
+            case BUILD_SUPPORTED_ABIS_SIGNATURE, BUILD_SUPPORTED_64_BIT_ABIS_SIGNATURE ->
+                buildStringArray(vm, DEVICE_CPU_ABI);
+            case BUILD_SUPPORTED_32_BIT_ABIS_SIGNATURE -> buildStringArray(vm);
             default -> super.getStaticObjectField(vm, dvmClass, signature);
         };
     }

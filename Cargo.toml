@@ -1,9 +1,8 @@
 [workspace]
-members = ["apps/api"]
+members = ["api"]
 resolver = "2"
 
 [workspace.package]
 edition = "2021"
 license = "MIT"
 authors = ["mengying"]
-

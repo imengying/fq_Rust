@@ -10,7 +10,7 @@
 
 ## 代码结构
 
-- `apps/api`: Rust API 服务
+- `api`: Rust API 服务
 - `signer`: Java signer worker 与 unidbg 资源
 - `configs/api.example.yaml`: 默认配置示例
 - `.github/workflows/ci.yml`: 编译与测试
@@ -106,7 +106,7 @@ docker compose up --build
 
 - [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
-- [signer.rs](/home/mengying/文档/code/fq_Rust/apps/api/src/signer.rs)
+- [signer.rs](/home/mengying/文档/code/fq_Rust/api/src/signer.rs)
 - [SignerWorker.java](/home/mengying/文档/code/fq_Rust/signer/src/main/java/com/mengying/fqnovel/SignerWorker.java)
 
 ## Docker Hub 发布

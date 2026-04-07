@@ -1,11 +1,10 @@
 *
 !Dockerfile
 !Cargo.toml
-!apps/
-!apps/api/
-!apps/api/Cargo.toml
-!apps/api/src/
-!apps/api/src/**
+!api/
+!api/Cargo.toml
+!api/src/
+!api/src/**
 !configs/
 !configs/api.example.yaml
 !signer/

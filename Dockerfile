@@ -2,8 +2,8 @@ FROM rust:1.82-bookworm AS rust-builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.toml
-COPY apps/api/Cargo.toml apps/api/Cargo.toml
-COPY apps/api/src apps/api/src
+COPY api/Cargo.toml api/Cargo.toml
+COPY api/src api/src
 RUN cargo build --workspace --release
 
 FROM maven:3.9.13-eclipse-temurin-25 AS signer-builder
