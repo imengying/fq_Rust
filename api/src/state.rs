@@ -29,7 +29,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(config: AppConfig) -> Result<Arc<Self>> {
         let http_client = reqwest::Client::builder()
-            .http1_only()
+            .http3_prior_knowledge()
             .no_gzip()
             .connect_timeout(Duration::from_millis(
                 config.fq.upstream.connect_timeout_ms,
