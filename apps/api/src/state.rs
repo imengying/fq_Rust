@@ -2,7 +2,7 @@ use crate::cache::TtlCache;
 use crate::config::AppConfig;
 use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
 use crate::sidecar::SidecarClient;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +32,8 @@ impl AppState {
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
-            sidecar_client: SidecarClient::new(config.fq.sidecar.command.clone())?,
+            sidecar_client: SidecarClient::new(config.fq.sidecar.command.clone())
+                .map_err(|error| anyhow!(error.message))?,
             http_client,
             search_cache: TtlCache::new(search_ttl),
             directory_cache: TtlCache::new(directory_ttl),
