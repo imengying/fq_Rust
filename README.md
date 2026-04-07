@@ -46,3 +46,27 @@ Rust 主服务 + Java signer sidecar 的番茄小说混合架构实现。
 ```bash
 docker compose up --build
 ```
+
+## Docker Hub 发布
+
+工作流在 [docker-publish.yml](/home/mengying/文档/code/fq_Rust/.github/workflows/docker-publish.yml)。
+
+触发方式：
+
+- push tag：`v*.*.*`
+- GitHub Actions 页面手动 `Run workflow`
+
+需要先在仓库 `Settings -> Secrets and variables -> Actions` 配置：
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+
+会推送两个多架构镜像：
+
+- `<DOCKERHUB_USERNAME>/fq-rust-api`
+- `<DOCKERHUB_USERNAME>/fq-rust-sidecar`
+
+标签规则：
+
+- tag push 时：推 `latest` 和当前 git tag
+- 手动触发时：默认推 `latest`，也可以额外填一个 `version_tag`
