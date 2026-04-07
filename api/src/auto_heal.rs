@@ -46,7 +46,8 @@ impl AutoHealManager {
             return false;
         }
 
-        trim_window(&mut state.failure_times, state.window_ms, now);
+        let window_ms = state.window_ms;
+        trim_window(&mut state.failure_times, window_ms, now);
         state.failure_times.push_back(now);
         if state.failure_times.len() < state.error_threshold {
             return false;
