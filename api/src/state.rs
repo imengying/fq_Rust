@@ -7,8 +7,10 @@ use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
 use crate::registerkey::RegisterKeyService;
 use crate::signer::SignerClient;
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::warn;
 
 #[derive(Clone)]
@@ -25,6 +27,7 @@ pub struct AppState {
     pub chapter_cache: TtlCache<ChapterInfo>,
     pub pg_chapter_cache: Option<PgChapterCache>,
     pub register_key_service: RegisterKeyService,
+    pub inflight_chapter_prefetch: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl AppState {
@@ -104,6 +107,7 @@ impl AppState {
                 config.fq.cache.register_key_ttl_ms,
                 config.fq.cache.register_key_max_entries as usize,
             ),
+            inflight_chapter_prefetch: Arc::new(DashMap::new()),
             config,
         }))
     }

@@ -14,6 +14,7 @@ use rand::RngExt;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -21,6 +22,7 @@ use uuid::Uuid;
 const SEARCH_PATH: &str = "/reading/bookapi/search/tab/v";
 const DIRECTORY_PATH: &str = "/reading/bookapi/directory/all_items/v";
 const BATCH_FULL_PATH: &str = "/reading/reader/batch_full/v";
+const MAX_CHAPTER_PREFETCH_SIZE: usize = 30;
 
 pub async fn search_books(
     state: &AppState,
@@ -111,7 +113,7 @@ pub async fn get_book_info(state: &AppState, book_id: &str) -> ServiceResult<Boo
 }
 
 pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> ServiceResult<ChapterInfo> {
-    let cache_key = format!("chapter:{book_id}:{chapter_id}");
+    let cache_key = chapter_cache_key(book_id, chapter_id);
     if let Some(cached) = state.chapter_cache.get(&cache_key) {
         return Ok(cached);
     }
@@ -129,72 +131,28 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
     }
 
     let directory = fetch_directory(state, book_id, true).await.ok();
+    if state.config.fq.prefetch.enabled {
+        if let Err(error) = prefetch_and_cache_dedup(state, book_id, chapter_id, directory.as_ref()).await {
+            warn!(
+                "chapter prefetch failed: book_id={}, chapter_id={}, reason={}",
+                book_id,
+                chapter_id,
+                error.message
+            );
+        }
+        if let Some(cached) = state.chapter_cache.get(&cache_key) {
+            return Ok(cached);
+        }
+    }
+
     let batch_response = fetch_batch_full(state, book_id, &[chapter_id.to_string()]).await?;
     let item_content = batch_response
         .data
         .get(chapter_id)
-        .cloned()
         .ok_or_else(|| ServiceError::internal("上游未返回目标章节"))?;
-
-    let content = item_content
-        .content
-        .clone()
-        .ok_or_else(|| ServiceError::internal("章节内容为空/过短"))?;
-    let resolve = resolve_register_key(state, item_content.key_version).await?;
-    let html = decrypt_chapter_with_retry(state, &content, item_content.key_version, &resolve).await?;
-    let text = extract_text(&html);
-    if text.trim().is_empty() {
-        return Err(ServiceError::internal("章节内容为空/过短"));
-    }
-
-    let context = directory
-        .as_ref()
-        .and_then(|value| chapter_context(value, chapter_id));
-    let title = first_non_blank(&[
-        item_content.title.as_deref().unwrap_or_default(),
-        context
-            .as_ref()
-            .and_then(|value| value.title.as_deref())
-            .unwrap_or_default(),
-        extract_title(&html).as_deref().unwrap_or(""),
-        "章节标题",
-    ]);
-    let author = item_content
-        .novel_data
-        .as_ref()
-        .and_then(|value| value.author.as_ref())
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("未知作者")
-        .to_string();
-
-    let chapter = ChapterInfo {
-        chapter_id: chapter_id.to_string(),
-        book_id: book_id.to_string(),
-        author_name: author,
-        title,
-        raw_content: None,
-        chapter_index: context.as_ref().map(|value| value.chapter_index),
-        word_count: text.chars().count() as i32,
-        update_time: now_ms(),
-        prev_chapter_id: context.as_ref().and_then(|value| value.prev_chapter_id.clone()),
-        next_chapter_id: context.as_ref().and_then(|value| value.next_chapter_id.clone()),
-        is_free: context.as_ref().map(|value| value.is_free),
-        txt_content: text,
-    };
-
-    state.chapter_cache.insert(cache_key, chapter.clone());
-    if let Some(pg_cache) = &state.pg_chapter_cache {
-        if let Err(error) = pg_cache.put(
-            &format!("chapter:{book_id}:{chapter_id}"),
-            &chapter,
-            now_ms(),
-        )
-        .await
-        {
-            warn!("chapter cache write failed: {error}");
-        }
-    }
+    let chapter =
+        build_chapter_from_item_content(state, book_id, chapter_id, item_content, directory.as_ref()).await?;
+    cache_chapter(state, &chapter).await;
     Ok(chapter)
 }
 
@@ -422,6 +380,68 @@ async fn fetch_batch_full_once(
     Ok(parsed)
 }
 
+async fn prefetch_and_cache_dedup(
+    state: &AppState,
+    book_id: &str,
+    chapter_id: &str,
+    directory: Option<&DirectoryResponse>,
+) -> ServiceResult<()> {
+    let Some(directory) = directory else {
+        return Ok(());
+    };
+    let batch_size = prefetch_batch_size(state);
+    let batch_ids = select_prefetch_batch_ids(directory, chapter_id, batch_size);
+    if batch_ids.is_empty() {
+        return Ok(());
+    }
+
+    let prefetch_key = compute_prefetch_key(book_id, directory, chapter_id, batch_size);
+    let lock = state
+        .inflight_chapter_prefetch
+        .entry(prefetch_key.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+
+    let _guard = lock.lock().await;
+    if state.chapter_cache.get(&chapter_cache_key(book_id, chapter_id)).is_some() {
+        return Ok(());
+    }
+
+    let result = do_prefetch_and_cache(state, book_id, directory, &batch_ids).await;
+    if Arc::strong_count(&lock) == 2 {
+        state.inflight_chapter_prefetch.remove(&prefetch_key);
+    }
+    result
+}
+
+async fn do_prefetch_and_cache(
+    state: &AppState,
+    book_id: &str,
+    directory: &DirectoryResponse,
+    batch_ids: &[String],
+) -> ServiceResult<()> {
+    let batch_response = fetch_batch_full(state, book_id, batch_ids).await?;
+
+    for item_id in batch_ids {
+        let Some(item_content) = batch_response.data.get(item_id) else {
+            continue;
+        };
+        match build_chapter_from_item_content(state, book_id, item_id, item_content, Some(directory)).await {
+            Ok(chapter) => cache_chapter(state, &chapter).await,
+            Err(error) => {
+                warn!(
+                    "prefetched chapter processing failed: book_id={}, chapter_id={}, reason={}",
+                    book_id,
+                    item_id,
+                    error.message
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn resolve_register_key(
     state: &AppState,
     required_keyver: Option<i64>,
@@ -511,6 +531,69 @@ async fn execute_signed_json_get(
         .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))?;
     state.record_success();
     Ok(parsed)
+}
+
+async fn build_chapter_from_item_content(
+    state: &AppState,
+    book_id: &str,
+    chapter_id: &str,
+    item_content: &ItemContent,
+    directory: Option<&DirectoryResponse>,
+) -> ServiceResult<ChapterInfo> {
+    let content = item_content
+        .content
+        .clone()
+        .ok_or_else(|| ServiceError::internal("章节内容为空/过短"))?;
+    let resolve = resolve_register_key(state, item_content.key_version).await?;
+    let html = decrypt_chapter_with_retry(state, &content, item_content.key_version, &resolve).await?;
+    let text = extract_text(&html);
+    if text.trim().is_empty() {
+        return Err(ServiceError::internal("章节内容为空/过短"));
+    }
+
+    let context = directory.and_then(|value| chapter_context(value, chapter_id));
+    let title = first_non_blank(&[
+        item_content.title.as_deref().unwrap_or_default(),
+        context
+            .as_ref()
+            .and_then(|value| value.title.as_deref())
+            .unwrap_or_default(),
+        extract_title(&html).as_deref().unwrap_or(""),
+        "章节标题",
+    ]);
+    let author = item_content
+        .novel_data
+        .as_ref()
+        .and_then(|value| value.author.as_ref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("未知作者")
+        .to_string();
+
+    Ok(ChapterInfo {
+        chapter_id: chapter_id.to_string(),
+        book_id: book_id.to_string(),
+        author_name: author,
+        title,
+        raw_content: None,
+        chapter_index: context.as_ref().map(|value| value.chapter_index),
+        word_count: text.chars().count() as i32,
+        update_time: now_ms(),
+        prev_chapter_id: context.as_ref().and_then(|value| value.prev_chapter_id.clone()),
+        next_chapter_id: context.as_ref().and_then(|value| value.next_chapter_id.clone()),
+        is_free: context.as_ref().map(|value| value.is_free),
+        txt_content: text,
+    })
+}
+
+async fn cache_chapter(state: &AppState, chapter: &ChapterInfo) {
+    let cache_key = chapter_cache_key(&chapter.book_id, &chapter.chapter_id);
+    state.chapter_cache.insert(cache_key.clone(), chapter.clone());
+    if let Some(pg_cache) = &state.pg_chapter_cache {
+        if let Err(error) = pg_cache.put(&cache_key, chapter, now_ms()).await {
+            warn!("chapter cache write failed: {error}");
+        }
+    }
 }
 
 async fn execute_signed_json_get_once(
@@ -827,10 +910,7 @@ fn parse_book_item(value: &Value) -> BookItem {
         ]),
         last_chapter_title: string_field(value, "last_chapter_title"),
         category: string_field(value, "category"),
-        word_count: value
-            .get("word_number")
-            .and_then(Value::as_u64)
-            .unwrap_or_default(),
+        word_count: parse_flexible_u64(value.get("word_number")),
     }
 }
 
@@ -867,6 +947,77 @@ fn trim_directory_for_minimal(directory: &mut DirectoryResponse) {
     directory.field_cache_status = None;
     directory.ban_recover = None;
     directory.additional_item_data_list = None;
+}
+
+fn prefetch_batch_size(state: &AppState) -> usize {
+    state
+        .config
+        .fq
+        .prefetch
+        .chapter_size
+        .clamp(1, MAX_CHAPTER_PREFETCH_SIZE)
+}
+
+fn compute_prefetch_key(
+    book_id: &str,
+    directory: &DirectoryResponse,
+    chapter_id: &str,
+    batch_size: usize,
+) -> String {
+    match directory
+        .item_data_list
+        .iter()
+        .position(|item| item.item_id == chapter_id)
+    {
+        Some(index) => {
+            let bucket_start = bucket_start_for(index, batch_size);
+            format!("{book_id}:bucket:{bucket_start}:{batch_size}")
+        }
+        None => format!("{book_id}:single:{chapter_id}"),
+    }
+}
+
+fn select_prefetch_batch_ids(
+    directory: &DirectoryResponse,
+    chapter_id: &str,
+    batch_size: usize,
+) -> Vec<String> {
+    if directory.item_data_list.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(chapter_index) = directory
+        .item_data_list
+        .iter()
+        .position(|item| item.item_id == chapter_id)
+    else {
+        return vec![chapter_id.to_string()];
+    };
+
+    let bucket_start = bucket_start_for(chapter_index, batch_size);
+    let end = (bucket_start + batch_size).min(directory.item_data_list.len());
+    directory.item_data_list[bucket_start..end]
+        .iter()
+        .filter_map(|item| {
+            let item_id = item.item_id.trim();
+            if item_id.is_empty() {
+                None
+            } else {
+                Some(item_id.to_string())
+            }
+        })
+        .collect()
+}
+
+fn bucket_start_for(chapter_index: usize, batch_size: usize) -> usize {
+    if batch_size == 0 {
+        return 0;
+    }
+    (chapter_index / batch_size) * batch_size
+}
+
+fn chapter_cache_key(book_id: &str, chapter_id: &str) -> String {
+    format!("chapter:{book_id}:{chapter_id}")
 }
 
 fn build_book_info(book_id: &str, directory: &DirectoryResponse) -> ServiceResult<BookInfo> {
@@ -963,6 +1114,14 @@ fn bool_from_value(value: Option<&Value>) -> Option<bool> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+fn parse_flexible_u64(value: Option<&Value>) -> u64 {
+    match value {
+        Some(Value::Number(n)) => n.as_u64().unwrap_or_default(),
+        Some(Value::String(s)) => s.parse::<u64>().unwrap_or_default(),
+        _ => 0,
     }
 }
 
@@ -1280,5 +1439,39 @@ mod tests {
         assert_eq!(parsed.total, 1);
         assert_eq!(parsed.search_id.as_deref(), Some("sid-1"));
         assert_eq!(parsed.books[0].book_name, "测试书");
+    }
+
+    #[test]
+    fn selects_prefetch_bucket_ids() {
+        let directory = DirectoryResponse {
+            item_data_list: (1..=7)
+                .map(|index| DirectoryItemData {
+                    item_id: index.to_string(),
+                    title: format!("第{index}章"),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+
+        let batch = select_prefetch_batch_ids(&directory, "4", 3);
+        assert_eq!(batch, vec!["4", "5", "6"]);
+    }
+
+    #[test]
+    fn computes_prefetch_bucket_key() {
+        let directory = DirectoryResponse {
+            item_data_list: (1..=7)
+                .map(|index| DirectoryItemData {
+                    item_id: index.to_string(),
+                    title: format!("第{index}章"),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+
+        let key = compute_prefetch_key("book1", &directory, "5", 3);
+        assert_eq!(key, "book1:bucket:3:3");
     }
 }

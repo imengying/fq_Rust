@@ -39,6 +39,7 @@ Java worker 不对外提供 HTTP 接口。
 - `fq.signer.command`: Rust 拉起 Java worker 的命令
 - `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
 - `fq.cache.postgres_url`: 可选 PostgreSQL 章节主缓存
+- `fq.prefetch`: 章节分桶预取；单章请求会顺带拉取同桶章节并写入缓存，减少后续 `batch_full` 次数
 - `fq.auto_heal`: 连续错误后的 registerkey 失效、设备轮换、signer 重启自愈
 - `fq.device_profile`: 当前生效设备信息
 - `fq.device_pool`: 可选设备池；如果配置了，会按 `fq.device_pool_startup_name` 或首项继承到运行设备

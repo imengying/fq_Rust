@@ -24,6 +24,7 @@ pub struct FqConfig {
     pub upstream: UpstreamConfig,
     pub signer: SignerConfig,
     pub cache: CacheConfig,
+    pub prefetch: PrefetchConfig,
     pub search: SearchConfig,
     pub auto_heal: AutoHealConfig,
     pub device_rotate_cooldown_ms: u64,
@@ -61,6 +62,13 @@ pub struct CacheConfig {
     pub register_key_max_entries: u64,
     pub postgres_url: Option<String>,
     pub postgres_table: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PrefetchConfig {
+    pub enabled: bool,
+    pub chapter_size: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -132,6 +140,7 @@ impl Default for FqConfig {
             upstream: UpstreamConfig::default(),
             signer: SignerConfig::default(),
             cache: CacheConfig::default(),
+            prefetch: PrefetchConfig::default(),
             search: SearchConfig::default(),
             auto_heal: AutoHealConfig::default(),
             device_rotate_cooldown_ms: 60_000,
@@ -189,6 +198,15 @@ impl Default for SearchConfig {
         Self {
             phase1_delay_min_ms: 1_000,
             phase1_delay_max_ms: 2_000,
+        }
+    }
+}
+
+impl Default for PrefetchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            chapter_size: 30,
         }
     }
 }
@@ -270,6 +288,11 @@ impl AppConfig {
         set_u64(
             &mut self.fq.cache.book_ttl_ms,
             "FQRS_BOOK_CACHE_TTL_MS",
+        );
+        set_bool(&mut self.fq.prefetch.enabled, "FQRS_PREFETCH_ENABLED");
+        set_usize(
+            &mut self.fq.prefetch.chapter_size,
+            "FQRS_PREFETCH_CHAPTER_SIZE",
         );
         set_u64(
             &mut self.fq.cache.register_key_ttl_ms,

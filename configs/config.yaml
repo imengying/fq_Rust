@@ -18,11 +18,15 @@ fq:
   cache:
     search_ttl_ms: 45000
     directory_ttl_ms: 600000
+    book_ttl_ms: 600000
     chapter_ttl_ms: 600000
     register_key_ttl_ms: 3600000
     register_key_max_entries: 128
     postgres_url:
     postgres_table: fq_chapter_cache
+  prefetch:
+    enabled: true
+    chapter_size: 30
   search:
     phase1_delay_min_ms: 1000
     phase1_delay_max_ms: 2000
