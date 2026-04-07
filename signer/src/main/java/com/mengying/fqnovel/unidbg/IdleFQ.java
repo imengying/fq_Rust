@@ -74,8 +74,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private static final String MS_DISPATCH_SIGNATURE =
         "com/bytedance/mobsec/metasec/ml/MS->b(IIJLjava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;";
     private static final String CURRENT_THREAD_SIGNATURE = "java/lang/Thread->currentThread()Ljava/lang/Thread;";
-    private static final String CURRENT_APPLICATION_SIGNATURE =
-        "android/app/ActivityThread->currentApplication()Landroid/app/Application;";
     private static final String THREAD_STACK_TRACE_SIGNATURE =
         "java/lang/Thread->getStackTrace()[Ljava/lang/StackTraceElement;";
     private static final String STACK_TRACE_CLASS_NAME_SIGNATURE =
@@ -83,124 +81,19 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private static final String STACK_TRACE_METHOD_NAME_SIGNATURE =
         "java/lang/StackTraceElement->getMethodName()Ljava/lang/String;";
     private static final String THREAD_GET_BYTES_SIGNATURE = "java/lang/Thread->getBytes(Ljava/lang/String;)[B";
-    private static final String CONTEXT_GET_PACKAGE_NAME_SIGNATURE =
-        "android/content/Context->getPackageName()Ljava/lang/String;";
-    private static final String APPLICATION_GET_PACKAGE_NAME_SIGNATURE =
-        "android/app/Application->getPackageName()Ljava/lang/String;";
-    private static final String LEGACY_APPLICATION_GET_PACKAGE_NAME_SIGNATURE =
-        "Landroid/app/Application;->getPackageName()Ljava/lang/String;";
-    private static final String CONTEXT_GET_APPLICATION_CONTEXT_SIGNATURE =
-        "android/content/Context->getApplicationContext()Landroid/content/Context;";
-    private static final String CONTEXT_GET_FILES_DIR_SIGNATURE =
-        "android/content/Context->getFilesDir()Ljava/io/File;";
-    private static final String CONTEXT_GET_PACKAGE_MANAGER_SIGNATURE =
-        "android/content/Context->getPackageManager()Landroid/content/pm/PackageManager;";
-    private static final String APPLICATION_GET_PACKAGE_MANAGER_SIGNATURE =
-        "android/app/Application->getPackageManager()Landroid/content/pm/PackageManager;";
-    private static final String LEGACY_APPLICATION_GET_PACKAGE_MANAGER_SIGNATURE =
-        "Landroid/app/Application;->getPackageManager()Landroid/content/pm/PackageManager;";
-    private static final String CONTEXT_GET_APPLICATION_INFO_SIGNATURE =
-        "android/content/Context->getApplicationInfo()Landroid/content/pm/ApplicationInfo;";
-    private static final String APPLICATION_GET_APPLICATION_INFO_SIGNATURE =
-        "android/app/Application->getApplicationInfo()Landroid/content/pm/ApplicationInfo;";
-    private static final String LEGACY_APPLICATION_GET_APPLICATION_INFO_SIGNATURE =
-        "Landroid/app/Application;->getApplicationInfo()Landroid/content/pm/ApplicationInfo;";
-    private static final String CONTEXT_GET_PACKAGE_CODE_PATH_SIGNATURE =
-        "android/content/Context->getPackageCodePath()Ljava/lang/String;";
-    private static final String CONTEXT_GET_PACKAGE_RESOURCE_PATH_SIGNATURE =
-        "android/content/Context->getPackageResourcePath()Ljava/lang/String;";
-    private static final String APPLICATION_GET_PACKAGE_CODE_PATH_SIGNATURE =
-        "android/app/Application->getPackageCodePath()Ljava/lang/String;";
-    private static final String APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE =
-        "android/app/Application->getPackageResourcePath()Ljava/lang/String;";
-    private static final String PACKAGE_MANAGER_GET_PACKAGE_INFO_SIGNATURE =
-        "android/content/pm/PackageManager->getPackageInfo(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;";
-    private static final String PACKAGE_MANAGER_GET_APPLICATION_INFO_SIGNATURE =
-        "android/content/pm/PackageManager->getApplicationInfo(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;";
-    private static final String PACKAGE_MANAGER_GET_INSTALLER_PACKAGE_NAME_SIGNATURE =
-        "android/content/pm/PackageManager->getInstallerPackageName(Ljava/lang/String;)Ljava/lang/String;";
-    private static final String PACKAGE_MANAGER_CHECK_PERMISSION_SIGNATURE =
-        "android/content/pm/PackageManager->checkPermission(Ljava/lang/String;Ljava/lang/String;)I";
-    private static final String FILE_GET_ABSOLUTE_PATH_SIGNATURE = "java/io/File->getAbsolutePath()Ljava/lang/String;";
-    private static final String FILE_GET_PATH_SIGNATURE = "java/io/File->getPath()Ljava/lang/String;";
     private static final String LONG_VALUE_SIGNATURE = "java/lang/Long->longValue()J";
     private static final String INTEGER_VALUE_SIGNATURE = "java/lang/Integer->intValue()I";
     private static final String BOOLEAN_VALUE_SIGNATURE = "java/lang/Boolean->booleanValue()Z";
     private static final String PATCHED_MS_VOID_SIGNATURE = "com/bytedance/mobsec/metasec/ml/MS->a()V";
-    private static final String PROCESS_MY_UID_SIGNATURE = "android/os/Process->myUid()I";
-    private static final String DEBUG_IS_DEBUGGER_CONNECTED_SIGNATURE = "android/os/Debug->isDebuggerConnected()Z";
-    private static final String CHECK_SELF_PERMISSION_SIGNATURE =
-        "android/content/Context->checkSelfPermission(Ljava/lang/String;)I";
-    private static final String BUILD_VERSION_RELEASE_SIGNATURE = "android/os/Build$VERSION->RELEASE:Ljava/lang/String;";
-    private static final String BUILD_VERSION_SDK_SIGNATURE = "android/os/Build$VERSION->SDK:Ljava/lang/String;";
-    private static final String BUILD_VERSION_SDK_INT_SIGNATURE = "android/os/Build$VERSION->SDK_INT:I";
-    private static final String BUILD_BRAND_SIGNATURE = "android/os/Build->BRAND:Ljava/lang/String;";
-    private static final String BUILD_MANUFACTURER_SIGNATURE = "android/os/Build->MANUFACTURER:Ljava/lang/String;";
-    private static final String BUILD_MODEL_SIGNATURE = "android/os/Build->MODEL:Ljava/lang/String;";
-    private static final String BUILD_DEVICE_SIGNATURE = "android/os/Build->DEVICE:Ljava/lang/String;";
-    private static final String BUILD_PRODUCT_SIGNATURE = "android/os/Build->PRODUCT:Ljava/lang/String;";
-    private static final String BUILD_HARDWARE_SIGNATURE = "android/os/Build->HARDWARE:Ljava/lang/String;";
-    private static final String BUILD_CPU_ABI_SIGNATURE = "android/os/Build->CPU_ABI:Ljava/lang/String;";
-    private static final String BUILD_CPU_ABI2_SIGNATURE = "android/os/Build->CPU_ABI2:Ljava/lang/String;";
-    private static final String BUILD_SUPPORTED_ABIS_SIGNATURE = "android/os/Build->SUPPORTED_ABIS:[Ljava/lang/String;";
-    private static final String BUILD_SUPPORTED_64_BIT_ABIS_SIGNATURE =
-        "android/os/Build->SUPPORTED_64_BIT_ABIS:[Ljava/lang/String;";
-    private static final String BUILD_SUPPORTED_32_BIT_ABIS_SIGNATURE =
-        "android/os/Build->SUPPORTED_32_BIT_ABIS:[Ljava/lang/String;";
-    private static final String APPLICATION_INFO_SOURCE_DIR_SIGNATURE =
-        "android/content/pm/ApplicationInfo->sourceDir:Ljava/lang/String;";
-    private static final String LEGACY_APPLICATION_INFO_SOURCE_DIR_SIGNATURE =
-        "Landroid/content/pm/ApplicationInfo;->sourceDir:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_PUBLIC_SOURCE_DIR_SIGNATURE =
-        "android/content/pm/ApplicationInfo->publicSourceDir:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_DATA_DIR_SIGNATURE =
-        "android/content/pm/ApplicationInfo->dataDir:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_NATIVE_LIBRARY_DIR_SIGNATURE =
-        "android/content/pm/ApplicationInfo->nativeLibraryDir:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_PACKAGE_NAME_SIGNATURE =
-        "android/content/pm/ApplicationInfo->packageName:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_PROCESS_NAME_SIGNATURE =
-        "android/content/pm/ApplicationInfo->processName:Ljava/lang/String;";
-    private static final String APPLICATION_INFO_UID_SIGNATURE = "android/content/pm/ApplicationInfo->uid:I";
-    private static final String APPLICATION_INFO_FLAGS_SIGNATURE = "android/content/pm/ApplicationInfo->flags:I";
-    private static final String APPLICATION_INFO_TARGET_SDK_VERSION_SIGNATURE =
-        "android/content/pm/ApplicationInfo->targetSdkVersion:I";
-    private static final String PACKAGE_INFO_PACKAGE_NAME_SIGNATURE =
-        "android/content/pm/PackageInfo->packageName:Ljava/lang/String;";
-    private static final String PACKAGE_INFO_VERSION_NAME_SIGNATURE =
-        "android/content/pm/PackageInfo->versionName:Ljava/lang/String;";
-    private static final String PACKAGE_INFO_VERSION_CODE_SIGNATURE =
-        "android/content/pm/PackageInfo->versionCode:I";
-    private static final String PACKAGE_INFO_APPLICATION_INFO_SIGNATURE =
-        "android/content/pm/PackageInfo->applicationInfo:Landroid/content/pm/ApplicationInfo;";
-    private static final String ANDROID_RELEASE = "6.0";
-    private static final String ANDROID_SDK = Integer.toString(SDK_VERSION);
-    private static final String DEVICE_BRAND = "Xiaomi";
-    private static final String DEVICE_MANUFACTURER = "Xiaomi";
-    private static final String DEVICE_MODEL = "Sirius";
-    private static final String DEVICE_NAME = "Sirius";
-    private static final String DEVICE_PRODUCT = "Sirius";
-    private static final String DEVICE_HARDWARE = "qcom";
-    private static final String DEVICE_CPU_ABI = "arm64-v8a";
-    private static final String INSTALLER_PACKAGE_NAME = "com.android.vending";
-    private static final String APP_VERSION_NAME = "6.8.1.32";
-    private static final int APPLICATION_INFO_FLAGS = 0x81;
-    private static final String NATIVE_LIBRARY_DIR = "/data/app/" + PACKAGE_NAME + "/lib/arm64";
 
     private final boolean loggable;
     private final AndroidEmulator emulator;
     private final Memory memory;
     private final Module module;
     private final DvmClass threadClass;
-    private final DvmClass applicationClass;
-    private final DvmClass contextClass;
     private final DvmClass stackTraceElementClass;
     private final DvmClass integerClass;
     private final DvmClass longClass;
-    private final DvmClass fileClass;
-    private final DvmClass packageManagerClass;
-    private final DvmClass applicationInfoClass;
-    private final DvmClass packageInfoClass;
     private final File apkFile;
     private final File soMetasecMlFile;
     private final File soCShareFile;
@@ -231,15 +124,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             this.emulator = emulatorCandidate;
             this.memory = emulatorCandidate.getMemory();
             this.threadClass = cachedClasses.threadClass();
-            this.applicationClass = cachedClasses.applicationClass();
-            this.contextClass = cachedClasses.contextClass();
             this.stackTraceElementClass = cachedClasses.stackTraceElementClass();
             this.integerClass = cachedClasses.integerClass();
             this.longClass = cachedClasses.longClass();
-            this.fileClass = cachedClasses.fileClass();
-            this.packageManagerClass = cachedClasses.packageManagerClass();
-            this.applicationInfoClass = cachedClasses.applicationInfoClass();
-            this.packageInfoClass = cachedClasses.packageInfoClass();
             this.module = moduleCandidate;
 
             logResolvedResources();
@@ -288,7 +175,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
         return switch (signature) {
             case MS_DISPATCH_SIGNATURE -> handleMSMethod(vm, vaList.getIntArg(0));
             case CURRENT_THREAD_SIGNATURE -> threadClass.newObject(Thread.currentThread());
-            case CURRENT_APPLICATION_SIGNATURE -> applicationClass.newObject(null);
             default -> super.callStaticObjectMethodV(vm, dvmClass, signature, vaList);
         };
     }
@@ -305,27 +191,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             case STACK_TRACE_METHOD_NAME_SIGNATURE -> {
                 StackTraceElement element = (StackTraceElement) dvmObject.getValue();
                 yield new StringObject(vm, element.getMethodName());
-            }
-            case CONTEXT_GET_PACKAGE_NAME_SIGNATURE, APPLICATION_GET_PACKAGE_NAME_SIGNATURE,
-                LEGACY_APPLICATION_GET_PACKAGE_NAME_SIGNATURE ->
-                new StringObject(vm, PACKAGE_NAME);
-            case CONTEXT_GET_APPLICATION_CONTEXT_SIGNATURE -> contextClass.newObject(null);
-            case CONTEXT_GET_FILES_DIR_SIGNATURE -> fileClass.newObject(new File(DATA_FILES_DIR));
-            case CONTEXT_GET_PACKAGE_MANAGER_SIGNATURE, APPLICATION_GET_PACKAGE_MANAGER_SIGNATURE,
-                LEGACY_APPLICATION_GET_PACKAGE_MANAGER_SIGNATURE ->
-                packageManagerClass.newObject(null);
-            case CONTEXT_GET_APPLICATION_INFO_SIGNATURE, APPLICATION_GET_APPLICATION_INFO_SIGNATURE,
-                LEGACY_APPLICATION_GET_APPLICATION_INFO_SIGNATURE ->
-                applicationInfoClass.newObject(null);
-            case CONTEXT_GET_PACKAGE_CODE_PATH_SIGNATURE, CONTEXT_GET_PACKAGE_RESOURCE_PATH_SIGNATURE,
-                APPLICATION_GET_PACKAGE_CODE_PATH_SIGNATURE, APPLICATION_GET_PACKAGE_RESOURCE_PATH_SIGNATURE ->
-                new StringObject(vm, apkFile.getAbsolutePath());
-            case PACKAGE_MANAGER_GET_PACKAGE_INFO_SIGNATURE -> packageInfoClass.newObject(null);
-            case PACKAGE_MANAGER_GET_APPLICATION_INFO_SIGNATURE -> applicationInfoClass.newObject(null);
-            case PACKAGE_MANAGER_GET_INSTALLER_PACKAGE_NAME_SIGNATURE -> new StringObject(vm, INSTALLER_PACKAGE_NAME);
-            case FILE_GET_ABSOLUTE_PATH_SIGNATURE, FILE_GET_PATH_SIGNATURE -> {
-                File file = (File) dvmObject.getValue();
-                yield new StringObject(vm, file.getAbsolutePath());
             }
             case THREAD_GET_BYTES_SIGNATURE -> {
                 String arg0 = (String) vaList.getObjectArg(0).getValue();
@@ -347,6 +212,20 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             }
         }
         return super.callLongMethodV(vm, dvmObject, signature, vaList);
+    }
+
+    @Override
+    public int getStaticIntField(BaseVM vm, DvmClass dvmClass, String signature) {
+        if (loggable) {
+            log.debug("getStaticIntField: {}", signature);
+        }
+        if (PATCHED_MS_VOID_SIGNATURE.equals(signature)) {
+            return 0x40;
+        }
+        if (loggable) {
+            log.debug("未处理的静态整数字段，降级返回0: {}", signature);
+        }
+        return 0;
     }
 
     @Override
@@ -375,12 +254,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
                 return Integer.parseInt(s);
             }
         }
-        if (CHECK_SELF_PERMISSION_SIGNATURE.equals(signature)) {
-            return 0;
-        }
-        if (PACKAGE_MANAGER_CHECK_PERMISSION_SIGNATURE.equals(signature)) {
-            return 0;
-        }
         return super.callIntMethodV(vm, dvmObject, signature, vaList);
     }
 
@@ -396,22 +269,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             }
         }
         return super.callBooleanMethodV(vm, dvmObject, signature, vaList);
-    }
-
-    @Override
-    public int callStaticIntMethodV(BaseVM vm, DvmClass dvmClass, String signature, VaList vaList) {
-        if (PROCESS_MY_UID_SIGNATURE.equals(signature)) {
-            return APP_UID;
-        }
-        return super.callStaticIntMethodV(vm, dvmClass, signature, vaList);
-    }
-
-    @Override
-    public boolean callStaticBooleanMethodV(BaseVM vm, DvmClass dvmClass, String signature, VaList vaList) {
-        if (DEBUG_IS_DEBUGGER_CONNECTED_SIGNATURE.equals(signature)) {
-            return false;
-        }
-        return super.callStaticBooleanMethodV(vm, dvmClass, signature, vaList);
     }
 
     @Override
@@ -506,15 +363,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
     private CachedClasses cacheVmClasses(VM vm) {
         return new CachedClasses(
             vm.resolveClass("java/lang/Thread"),
-            vm.resolveClass("android/app/Application"),
-            vm.resolveClass("android/content/Context"),
             vm.resolveClass("java/lang/StackTraceElement"),
             vm.resolveClass("java.lang.Integer"),
-            vm.resolveClass("java/lang/Long"),
-            vm.resolveClass("java/io/File"),
-            vm.resolveClass("android/content/pm/PackageManager"),
-            vm.resolveClass("android/content/pm/ApplicationInfo"),
-            vm.resolveClass("android/content/pm/PackageInfo")
+            vm.resolveClass("java/lang/Long")
         );
     }
 
@@ -577,80 +428,6 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
             log.debug("成功读取证书文件: {} bytes", msCertData.length);
         }
         return new ByteArray(vm, msCertData);
-    }
-
-    private DvmObject<?> buildStringArray(VM vm, String... values) {
-        StringObject[] objects = new StringObject[values.length];
-        for (int i = 0; i < values.length; i++) {
-            objects[i] = new StringObject(vm, values[i]);
-        }
-        return new ArrayObject(objects);
-    }
-
-    @Override
-    public int getStaticIntField(BaseVM vm, DvmClass dvmClass, String signature) {
-        if (loggable) {
-            log.debug("getStaticIntField: {}", signature);
-        }
-        if (PATCHED_MS_VOID_SIGNATURE.equals(signature)) {
-            return 0x40;
-        }
-        if (BUILD_VERSION_SDK_INT_SIGNATURE.equals(signature)) {
-            return SDK_VERSION;
-        }
-        if (APPLICATION_INFO_UID_SIGNATURE.equals(signature)) {
-            return APP_UID;
-        }
-        if (APPLICATION_INFO_FLAGS_SIGNATURE.equals(signature)) {
-            return APPLICATION_INFO_FLAGS;
-        }
-        if (APPLICATION_INFO_TARGET_SDK_VERSION_SIGNATURE.equals(signature)) {
-            return SDK_VERSION;
-        }
-        if (PACKAGE_INFO_VERSION_CODE_SIGNATURE.equals(signature)) {
-            return APP_VERSION_CODE;
-        }
-        if (loggable) {
-            log.debug("未处理的静态整数字段，降级返回0: {}", signature);
-        }
-        return 0;
-    }
-
-    @Override
-    public DvmObject<?> getStaticObjectField(BaseVM vm, DvmClass dvmClass, String signature) {
-        return switch (signature) {
-            case BUILD_VERSION_RELEASE_SIGNATURE -> new StringObject(vm, ANDROID_RELEASE);
-            case BUILD_VERSION_SDK_SIGNATURE -> new StringObject(vm, ANDROID_SDK);
-            case BUILD_BRAND_SIGNATURE -> new StringObject(vm, DEVICE_BRAND);
-            case BUILD_MANUFACTURER_SIGNATURE -> new StringObject(vm, DEVICE_MANUFACTURER);
-            case BUILD_MODEL_SIGNATURE -> new StringObject(vm, DEVICE_MODEL);
-            case BUILD_DEVICE_SIGNATURE -> new StringObject(vm, DEVICE_NAME);
-            case BUILD_PRODUCT_SIGNATURE -> new StringObject(vm, DEVICE_PRODUCT);
-            case BUILD_HARDWARE_SIGNATURE -> new StringObject(vm, DEVICE_HARDWARE);
-            case BUILD_CPU_ABI_SIGNATURE -> new StringObject(vm, DEVICE_CPU_ABI);
-            case BUILD_CPU_ABI2_SIGNATURE -> new StringObject(vm, "");
-            case BUILD_SUPPORTED_ABIS_SIGNATURE, BUILD_SUPPORTED_64_BIT_ABIS_SIGNATURE ->
-                buildStringArray(vm, DEVICE_CPU_ABI);
-            case BUILD_SUPPORTED_32_BIT_ABIS_SIGNATURE -> buildStringArray(vm);
-            default -> super.getStaticObjectField(vm, dvmClass, signature);
-        };
-    }
-
-    @Override
-    public DvmObject<?> getObjectField(BaseVM vm, DvmObject<?> dvmObject, String signature) {
-        return switch (signature) {
-            case APPLICATION_INFO_SOURCE_DIR_SIGNATURE, LEGACY_APPLICATION_INFO_SOURCE_DIR_SIGNATURE ->
-                new StringObject(vm, apkFile.getAbsolutePath());
-            case APPLICATION_INFO_PUBLIC_SOURCE_DIR_SIGNATURE -> new StringObject(vm, apkFile.getAbsolutePath());
-            case APPLICATION_INFO_DATA_DIR_SIGNATURE -> new StringObject(vm, DATA_USER_DIR);
-            case APPLICATION_INFO_NATIVE_LIBRARY_DIR_SIGNATURE -> new StringObject(vm, NATIVE_LIBRARY_DIR);
-            case APPLICATION_INFO_PACKAGE_NAME_SIGNATURE, APPLICATION_INFO_PROCESS_NAME_SIGNATURE ->
-                new StringObject(vm, PACKAGE_NAME);
-            case PACKAGE_INFO_PACKAGE_NAME_SIGNATURE -> new StringObject(vm, PACKAGE_NAME);
-            case PACKAGE_INFO_VERSION_NAME_SIGNATURE -> new StringObject(vm, APP_VERSION_NAME);
-            case PACKAGE_INFO_APPLICATION_INFO_SIGNATURE -> applicationInfoClass.newObject(null);
-            default -> super.getObjectField(vm, dvmObject, signature);
-        };
     }
 
     private static FileResult openVirtualFile(int oflags, File file, String pathname) {
@@ -802,15 +579,9 @@ public final class IdleFQ extends AbstractJni implements IOResolver<AndroidFileI
 
     private record CachedClasses(
         DvmClass threadClass,
-        DvmClass applicationClass,
-        DvmClass contextClass,
         DvmClass stackTraceElementClass,
         DvmClass integerClass,
-        DvmClass longClass,
-        DvmClass fileClass,
-        DvmClass packageManagerClass,
-        DvmClass applicationInfoClass,
-        DvmClass packageInfoClass
+        DvmClass longClass
     ) {
     }
 }
