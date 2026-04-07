@@ -463,6 +463,19 @@ async fn execute_signed_json_get(
         .map_err(|error| ServiceError::internal(format!("上游请求失败: {error}")))?;
 
     let status = response.status();
+    let response_url = response.url().to_string();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let content_length = response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let content_encoding = response
         .headers()
         .get(reqwest::header::CONTENT_ENCODING)
@@ -477,9 +490,13 @@ async fn execute_signed_json_get(
     let trimmed_body = body_text.trim();
     if trimmed_body.is_empty() {
         return Err(ServiceError::internal(format!(
-            "上游返回空响应: status={}, bytes={}",
+            "上游返回空响应: status={}, bytes={}, content_length={}, content_type={}, url={}",
             status.as_u16(),
             body.len()
+            ,
+            content_length,
+            content_type,
+            response_url
         )));
     }
     if !status.is_success() {
