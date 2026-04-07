@@ -37,6 +37,7 @@ Java worker 不对外提供 HTTP 接口。
 
 - `fq.upstream`: 番茄上游地址与超时
 - `fq.signer.command`: Rust 拉起 Java worker 的命令
+- `fq.signer.backend`: signer 后端类型；当前主线默认 `java_worker`，并预留了 `rust_native` 入口
 - `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
 - `fq.cache.postgres_url`: 可选 PostgreSQL 章节主缓存
 - `fq.prefetch`: 章节分桶预取；单章请求会顺带拉取同桶章节并写入缓存，减少后续 `batch_full` 次数
@@ -51,6 +52,7 @@ Java worker 不对外提供 HTTP 接口。
 ```yaml
 fq:
   signer:
+    backend: java_worker
     command:
       - java
       - --enable-native-access=ALL-UNNAMED
@@ -58,7 +60,9 @@ fq:
       - /app/fq-signer.jar
 ```
 
-也可以用环境变量 `FQRS_SIGNER_COMMAND` 覆盖。
+也可以用环境变量覆盖：
+- `FQRS_SIGNER_BACKEND`
+- `FQRS_SIGNER_COMMAND`
 
 ## 本地运行
 

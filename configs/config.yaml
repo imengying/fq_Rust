@@ -9,6 +9,7 @@ fq:
     connect_timeout_ms: 15000
     read_timeout_ms: 30000
   signer:
+    backend: java_worker
     command:
       - java
       - --enable-native-access=ALL-UNNAMED

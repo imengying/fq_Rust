@@ -47,8 +47,16 @@ pub struct UpstreamConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SignerConfig {
+    pub backend: SignerBackendKind,
     pub command: Vec<String>,
     pub restart_cooldown_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignerBackendKind {
+    JavaWorker,
+    RustNative,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -167,6 +175,7 @@ impl Default for UpstreamConfig {
 impl Default for SignerConfig {
     fn default() -> Self {
         Self {
+            backend: SignerBackendKind::JavaWorker,
             command: vec![
                 "java".to_string(),
                 "--enable-native-access=ALL-UNNAMED".to_string(),
@@ -175,6 +184,12 @@ impl Default for SignerConfig {
             ],
             restart_cooldown_ms: 2_000,
         }
+    }
+}
+
+impl Default for SignerBackendKind {
+    fn default() -> Self {
+        Self::JavaWorker
     }
 }
 
@@ -281,6 +296,7 @@ impl AppConfig {
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
         set_command(&mut self.fq.signer.command, "FQRS_SIGNER_COMMAND");
+        set_signer_backend(&mut self.fq.signer.backend, "FQRS_SIGNER_BACKEND");
         set_u64(
             &mut self.fq.signer.restart_cooldown_ms,
             "FQRS_SIGNER_RESTART_COOLDOWN_MS",
@@ -335,7 +351,9 @@ impl AppConfig {
         if self.server.port == 0 {
             return Err(anyhow!("server.port 不能为空"));
         }
-        if self.fq.signer.command.is_empty() {
+        if self.fq.signer.backend == SignerBackendKind::JavaWorker
+            && self.fq.signer.command.is_empty()
+        {
             return Err(anyhow!("fq.signer.command 不能为空"));
         }
         if self.fq.cache.postgres_table.trim().is_empty() {
@@ -518,6 +536,16 @@ fn set_bool(target: &mut bool, key: &str) {
         match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => *target = true,
             "0" | "false" | "no" | "off" => *target = false,
+            _ => {}
+        }
+    }
+}
+
+fn set_signer_backend(target: &mut SignerBackendKind, key: &str) {
+    if let Ok(value) = env::var(key) {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "java_worker" | "java-worker" | "java" => *target = SignerBackendKind::JavaWorker,
+            "rust_native" | "rust-native" | "rust" => *target = SignerBackendKind::RustNative,
             _ => {}
         }
     }

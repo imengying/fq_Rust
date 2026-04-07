@@ -1,4 +1,4 @@
-use crate::config::SignerConfig;
+use crate::config::{SignerBackendKind, SignerConfig};
 use crate::fq::now_ms;
 use crate::models::{ServiceError, ServiceResult};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct SignerClient {
-    inner: Arc<Mutex<SignerProcess>>,
+    backend: Arc<dyn SignerBackend>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,59 +21,111 @@ pub struct SignResult {
     pub headers: IndexMap<String, String>,
 }
 
+trait SignerBackend: Send + Sync {
+    fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult>;
+    fn restart_blocking(&self, reason: &str) -> ServiceResult<bool>;
+}
+
 impl SignerClient {
     pub fn new(config: SignerConfig) -> ServiceResult<Self> {
-        let mut process = SignerProcess::new(config.command, config.restart_cooldown_ms);
-        process.ensure_started()?;
-        Ok(Self {
-            inner: Arc::new(Mutex::new(process)),
-        })
+        let backend: Arc<dyn SignerBackend> = match config.backend {
+            SignerBackendKind::JavaWorker => Arc::new(JavaWorkerSignerBackend::new(
+                config.command,
+                config.restart_cooldown_ms,
+            )?),
+            SignerBackendKind::RustNative => {
+                warn!("signer backend rust_native is selected, but native signer is not implemented yet");
+                Arc::new(RustNativeSignerBackend)
+            }
+        };
+        Ok(Self { backend })
     }
 
     pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
-        let headers_text = build_signature_input_headers(headers);
-        let inner = self.inner.clone();
+        let backend = self.backend.clone();
         let url = url.to_string();
+        let headers = headers.clone();
         task::spawn_blocking(move || {
-            let mut process = inner
-                .lock()
-                .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
-
-            match process.sign(&url, &headers_text) {
-                Ok(raw) => {
-                    info!("signer raw output (len={}): {}", raw.len(), truncate(&raw, 800));
-                    Ok(SignResult {
-                        headers: parse_signature_result(&raw)?,
-                    })
-                }
-                Err(error) => {
-                    if process.should_restart_after_sign_error(&error)
-                        && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
-                    {
-                        let raw = process.sign(&url, &headers_text)?;
-                        return Ok(SignResult {
-                            headers: parse_signature_result(&raw)?,
-                        });
-                    }
-                    Err(error)
-                }
-            }
+            backend.sign_blocking(&url, &headers)
         })
         .await
         .map_err(|error| ServiceError::internal(format!("signer 请求执行失败: {error}")))?
     }
 
     pub async fn restart(&self, reason: &str) -> ServiceResult<bool> {
-        let inner = self.inner.clone();
+        let backend = self.backend.clone();
         let reason = reason.to_string();
         task::spawn_blocking(move || {
-            let mut process = inner
-                .lock()
-                .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
-            process.restart_if_allowed(&reason)
+            backend.restart_blocking(&reason)
         })
         .await
         .map_err(|error| ServiceError::internal(format!("signer 重启执行失败: {error}")))?
+    }
+}
+
+struct JavaWorkerSignerBackend {
+    inner: Arc<Mutex<SignerProcess>>,
+}
+
+impl JavaWorkerSignerBackend {
+    fn new(command: Vec<String>, restart_cooldown_ms: u64) -> ServiceResult<Self> {
+        let mut process = SignerProcess::new(command, restart_cooldown_ms);
+        process.ensure_started()?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(process)),
+        })
+    }
+}
+
+impl SignerBackend for JavaWorkerSignerBackend {
+    fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
+        let headers_text = build_signature_input_headers(headers);
+        let mut process = self
+            .inner
+            .lock()
+            .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
+
+        match process.sign(url, &headers_text) {
+            Ok(raw) => {
+                info!("signer raw output (len={}): {}", raw.len(), truncate(&raw, 800));
+                Ok(SignResult {
+                    headers: parse_signature_result(&raw)?,
+                })
+            }
+            Err(error) => {
+                if process.should_restart_after_sign_error(&error)
+                    && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
+                {
+                    let raw = process.sign(url, &headers_text)?;
+                    return Ok(SignResult {
+                        headers: parse_signature_result(&raw)?,
+                    });
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn restart_blocking(&self, reason: &str) -> ServiceResult<bool> {
+        let mut process = self
+            .inner
+            .lock()
+            .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
+        process.restart_if_allowed(reason)
+    }
+}
+
+struct RustNativeSignerBackend;
+
+impl SignerBackend for RustNativeSignerBackend {
+    fn sign_blocking(&self, _url: &str, _headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
+        Err(ServiceError::internal(
+            "rust_native signer backend is not implemented yet",
+        ))
+    }
+
+    fn restart_blocking(&self, _reason: &str) -> ServiceResult<bool> {
+        Ok(false)
     }
 }
 
