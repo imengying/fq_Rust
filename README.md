@@ -29,18 +29,19 @@ Rust 主服务 + Java signer sidecar 的番茄小说混合架构实现。
 
 工作流位置：`.github/workflows/ci.yml`
 
-- Rust：`cargo fmt --check`、`cargo test`、`cargo build --release`
+- Rust：`cargo test`、`cargo build --release`
 - Java：`mvn -DskipTests package`
 - 构建产物会作为 workflow artifact 上传
 
 ## Docker
 
 当前按单镜像方式部署：一个容器内同时运行 Rust API 和 Java sidecar。
+最终层走 `gcr.io/distroless/java25-debian13:nonroot`，不再依赖 shell 脚本。
 
 关键文件：
 
 - [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
-- [container-entrypoint.sh](/home/mengying/文档/code/fq_Rust/scripts/container-entrypoint.sh)
+- [container-launcher.rs](/home/mengying/文档/code/fq_Rust/apps/api/src/bin/container-launcher.rs)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
 
 启动时只要把 `.env.example` 复制成 `.env` 并改 token，然后执行：

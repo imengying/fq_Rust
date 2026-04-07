@@ -18,7 +18,7 @@
     <description>FQ Novel signer/registerkey sidecar</description>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <unidbg.version>0.9.8</unidbg.version>
         <maven.test.skip>true</maven.test.skip>
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>

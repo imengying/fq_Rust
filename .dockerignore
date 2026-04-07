@@ -12,6 +12,3 @@
 !sidecar/pom.xml
 !sidecar/src/
 !sidecar/src/**
-!scripts/
-!scripts/container-entrypoint.sh
-
