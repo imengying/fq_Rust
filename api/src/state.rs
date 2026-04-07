@@ -17,6 +17,7 @@ pub struct AppState {
     pub auto_heal: AutoHealManager,
     pub device_pool: DevicePoolManager,
     pub http_client: reqwest::Client,
+    pub http_client_fallback: reqwest::Client,
     pub signer_client: SignerClient,
     pub search_cache: TtlCache<SearchResponse>,
     pub directory_cache: TtlCache<DirectoryResponse>,
@@ -30,6 +31,14 @@ impl AppState {
     pub async fn new(config: AppConfig) -> Result<Arc<Self>> {
         let http_client = reqwest::Client::builder()
             .http3_prior_knowledge()
+            .no_gzip()
+            .connect_timeout(Duration::from_millis(
+                config.fq.upstream.connect_timeout_ms,
+            ))
+            .timeout(Duration::from_millis(config.fq.upstream.read_timeout_ms))
+            .build()?;
+        let http_client_fallback = reqwest::Client::builder()
+            .http1_only()
             .no_gzip()
             .connect_timeout(Duration::from_millis(
                 config.fq.upstream.connect_timeout_ms,
@@ -84,6 +93,7 @@ impl AppState {
             signer_client: SignerClient::new(config.fq.signer.clone())
                 .map_err(|error| anyhow!(error.message))?,
             http_client,
+            http_client_fallback,
             search_cache: TtlCache::new(search_ttl),
             directory_cache: TtlCache::new(directory_ttl),
             book_cache: TtlCache::new(directory_ttl),

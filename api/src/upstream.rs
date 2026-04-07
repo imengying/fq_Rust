@@ -464,10 +464,62 @@ async fn execute_signed_json_get(
     headers: IndexMap<String, String>,
 ) -> ServiceResult<Value> {
     let sign = state.signer_client.sign(url, &headers).await?;
-    let response = state
-        .http_client
+    let merged_headers = merge_headers(&headers, &sign.headers)?;
+    let attempt = execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
+    let attempt = if attempt.body_text.trim().is_empty() {
+        warn!(
+            "http3 upstream returned empty body, retrying over http1: status={}, content_length={}, content_type={}, url={}",
+            attempt.status.as_u16(),
+            attempt.content_length,
+            attempt.content_type,
+            attempt.response_url
+        );
+        execute_signed_json_get_once(&state.http_client_fallback, url, merged_headers).await?
+    } else {
+        attempt
+    };
+    let trimmed_body = attempt.body_text.trim();
+    if trimmed_body.is_empty() {
+        return Err(ServiceError::internal(format!(
+            "上游返回空响应: status={}, bytes={}, content_length={}, content_type={}, url={}",
+            attempt.status.as_u16(),
+            attempt.body_len,
+            attempt.content_length,
+            attempt.content_type,
+            attempt.response_url
+        )));
+    }
+    if !attempt.status.is_success() {
+        return Err(ServiceError::internal(format!(
+            "上游 HTTP 状态异常: {}",
+            attempt.status.as_u16()
+        )));
+    }
+
+    if !trimmed_body.starts_with('{') && !trimmed_body.starts_with('[') {
+        if contains_illegal_access(trimmed_body) {
+            return Err(ServiceError::new(110, "ILLEGAL_ACCESS"));
+        }
+        return Err(ServiceError::internal(format!(
+            "上游返回非JSON响应: {}",
+            truncate_for_log(trimmed_body, 240)
+        )));
+    }
+
+    let parsed = serde_json::from_str(&attempt.body_text)
+        .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))?;
+    state.record_success();
+    Ok(parsed)
+}
+
+async fn execute_signed_json_get_once(
+    client: &reqwest::Client,
+    url: &str,
+    headers: reqwest::header::HeaderMap,
+) -> ServiceResult<UpstreamHttpResponse> {
+    let response = client
         .get(url)
-        .headers(merge_headers(&headers, &sign.headers)?)
+        .headers(headers)
         .send()
         .await
         .map_err(|error| ServiceError::internal(format!("上游请求失败: {error}")))?;
@@ -497,39 +549,15 @@ async fn execute_signed_json_get(
         .map_err(|error| ServiceError::internal(format!("上游响应读取失败: {error}")))?;
     let body_text = decode_upstream_response(body.as_ref(), content_encoding.as_deref())
         .map_err(|error| ServiceError::internal(format!("上游响应解码失败: {error}")))?;
-    let trimmed_body = body_text.trim();
-    if trimmed_body.is_empty() {
-        return Err(ServiceError::internal(format!(
-            "上游返回空响应: status={}, bytes={}, content_length={}, content_type={}, url={}",
-            status.as_u16(),
-            body.len()
-            ,
-            content_length,
-            content_type,
-            response_url
-        )));
-    }
-    if !status.is_success() {
-        return Err(ServiceError::internal(format!(
-            "上游 HTTP 状态异常: {}",
-            status.as_u16()
-        )));
-    }
 
-    if !trimmed_body.starts_with('{') && !trimmed_body.starts_with('[') {
-        if contains_illegal_access(trimmed_body) {
-            return Err(ServiceError::new(110, "ILLEGAL_ACCESS"));
-        }
-        return Err(ServiceError::internal(format!(
-            "上游返回非JSON响应: {}",
-            truncate_for_log(trimmed_body, 240)
-        )));
-    }
-
-    let parsed = serde_json::from_str(&body_text)
-        .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))?;
-    state.record_success();
-    Ok(parsed)
+    Ok(UpstreamHttpResponse {
+        status,
+        response_url,
+        content_type,
+        content_length,
+        body_len: body.len(),
+        body_text,
+    })
 }
 
 fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
@@ -1125,6 +1153,15 @@ struct ChapterContext {
 enum ProbeOutcome {
     Passed(String),
     Failed(String),
+}
+
+struct UpstreamHttpResponse {
+    status: reqwest::StatusCode,
+    response_url: String,
+    content_type: String,
+    content_length: String,
+    body_len: usize,
+    body_text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
