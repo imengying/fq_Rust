@@ -1,22 +1,20 @@
 use crate::config::SignerConfig;
 use crate::fq::now_ms;
 use crate::models::{ServiceError, ServiceResult};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use indexmap::IndexMap;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::task;
 use tracing::warn;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct SignerClient {
     inner: Arc<Mutex<SignerProcess>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SignResult {
     pub headers: IndexMap<String, String>,
 }
@@ -32,28 +30,24 @@ impl SignerClient {
 
     pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
         let headers_text = build_signature_input_headers(headers);
-        let params = serde_json::to_value(SignRequest {
-            url,
-            headers_text: &headers_text,
-        })
-        .map_err(|error| ServiceError::internal(format!("signer 请求序列化失败: {error}")))?;
         let inner = self.inner.clone();
+        let url = url.to_string();
         task::spawn_blocking(move || {
             let mut process = inner
                 .lock()
                 .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
 
-            match process.call::<JavaSignResult>("sign", params.clone()) {
-                Ok(data) => Ok(SignResult {
-                    headers: parse_signature_result(&data.raw)?,
+            match process.sign(&url, &headers_text) {
+                Ok(raw) => Ok(SignResult {
+                    headers: parse_signature_result(&raw)?,
                 }),
                 Err(error) => {
                     if process.should_restart_after_sign_error(&error)
                         && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
                     {
-                        let data = process.call::<JavaSignResult>("sign", params)?;
+                        let raw = process.sign(&url, &headers_text)?;
                         return Ok(SignResult {
-                            headers: parse_signature_result(&data.raw)?,
+                            headers: parse_signature_result(&raw)?,
                         });
                     }
                     Err(error)
@@ -86,19 +80,13 @@ impl SignerProcess {
         }
     }
 
-    fn call<T>(&mut self, method: &str, params: Value) -> ServiceResult<T>
-    where
-        T: DeserializeOwned,
-    {
+    fn sign(&mut self, url: &str, headers_text: &str) -> ServiceResult<String> {
         self.ensure_started()?;
-        let request = WorkerRequest {
-            id: Uuid::new_v4().to_string(),
-            method: method.to_string(),
-            params,
-        };
-
-        let payload = serde_json::to_string(&request)
-            .map_err(|error| ServiceError::internal(format!("signer 请求编码失败: {error}")))?;
+        let payload = format!(
+            "sign\t{}\t{}\n",
+            encode_protocol_field(url),
+            encode_protocol_field(headers_text)
+        );
 
         let write_result = {
             let stdin = self
@@ -107,7 +95,6 @@ impl SignerProcess {
                 .ok_or_else(|| ServiceError::internal("signer stdin 不可用"))?;
             stdin
                 .write_all(payload.as_bytes())
-                .and_then(|_| stdin.write_all(b"\n"))
                 .and_then(|_| stdin.flush())
         };
         if let Err(error) = write_result {
@@ -135,20 +122,7 @@ impl SignerProcess {
             return Err(ServiceError::internal("signer 已退出"));
         }
 
-        let response: WorkerResponse<T> = serde_json::from_str(&line).map_err(|error| {
-            ServiceError::internal(format!(
-                "signer 响应解析失败: {error}; raw={}",
-                truncate(&line, 512)
-            ))
-        })?;
-
-        if response.code != 0 {
-            return Err(ServiceError::new(response.code, response.message));
-        }
-
-        response
-            .data
-            .ok_or_else(|| ServiceError::internal("signer 返回空 data"))
+        parse_sign_response(&line)
     }
 
     fn ensure_started(&mut self) -> ServiceResult<()> {
@@ -223,36 +197,77 @@ impl Drop for SignerProcess {
     }
 }
 
-#[derive(Serialize)]
-struct SignRequest<'a> {
-    url: &'a str,
-    headers_text: &'a str,
-}
-
-#[derive(Serialize)]
-struct WorkerRequest {
-    id: String,
-    method: String,
-    params: Value,
-}
-
-#[derive(Deserialize)]
-struct WorkerResponse<T> {
-    code: i32,
-    message: String,
-    data: Option<T>,
-}
-
-#[derive(Deserialize)]
-struct JavaSignResult {
-    raw: String,
-}
-
 fn truncate(value: &str, max_len: usize) -> String {
     if value.len() <= max_len {
         value.to_string()
     } else {
         format!("{}...", &value[..max_len])
+    }
+}
+
+fn encode_protocol_field(value: &str) -> String {
+    URL_SAFE_NO_PAD.encode(value.as_bytes())
+}
+
+fn decode_protocol_field(field: &str, name: &str) -> ServiceResult<String> {
+    let bytes = URL_SAFE_NO_PAD.decode(field).map_err(|error| {
+        ServiceError::internal(format!("signer {name} 字段解码失败: {error}"))
+    })?;
+    String::from_utf8(bytes)
+        .map_err(|error| ServiceError::internal(format!("signer {name} 字段不是合法 UTF-8: {error}")))
+}
+
+fn parse_sign_response(line: &str) -> ServiceResult<String> {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    if trimmed.is_empty() {
+        return Err(ServiceError::internal("signer 返回空响应"));
+    }
+
+    let mut parts = trimmed.split('\t');
+    let status = parts
+        .next()
+        .ok_or_else(|| ServiceError::internal("signer 响应缺少状态字段"))?;
+
+    match status {
+        "ok" => {
+            let raw = parts
+                .next()
+                .ok_or_else(|| ServiceError::internal("signer 响应缺少签名字段"))?;
+            if parts.next().is_some() {
+                return Err(ServiceError::internal(format!(
+                    "signer ok 响应字段异常: raw={}",
+                    truncate(trimmed, 512)
+                )));
+            }
+            decode_protocol_field(raw, "raw")
+        }
+        "err" => {
+            let code = parts
+                .next()
+                .ok_or_else(|| ServiceError::internal("signer 错误响应缺少 code"))?;
+            let message = parts
+                .next()
+                .ok_or_else(|| ServiceError::internal("signer 错误响应缺少 message"))?;
+            if parts.next().is_some() {
+                return Err(ServiceError::internal(format!(
+                    "signer err 响应字段异常: raw={}",
+                    truncate(trimmed, 512)
+                )));
+            }
+
+            let code = code.parse::<i32>().map_err(|error| {
+                ServiceError::internal(format!(
+                    "signer 错误码解析失败: {error}; raw={}",
+                    truncate(trimmed, 512)
+                ))
+            })?;
+            let message = decode_protocol_field(message, "message")?;
+            Err(ServiceError::new(code, message))
+        }
+        _ => Err(ServiceError::internal(format!(
+            "signer 响应状态无效: raw={}",
+            truncate(trimmed, 512)
+        ))),
     }
 }
 
@@ -344,4 +359,24 @@ fn remove_header_ignore_case(
         .into_iter()
         .filter(|(key, _)| !key.eq_ignore_ascii_case(target))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{encode_protocol_field, parse_sign_response};
+
+    #[test]
+    fn parse_ok_response_decodes_base64_payload() {
+        let line = format!("ok\t{}\n", encode_protocol_field("a:1\r\nb:2"));
+        let raw = parse_sign_response(&line).expect("ok response should decode");
+        assert_eq!(raw, "a:1\r\nb:2");
+    }
+
+    #[test]
+    fn parse_error_response_returns_service_error() {
+        let line = format!("err\t1003\t{}\n", encode_protocol_field("signer unavailable"));
+        let error = parse_sign_response(&line).expect_err("err response should fail");
+        assert_eq!(error.code, 1003);
+        assert_eq!(error.message, "signer unavailable");
+    }
 }
