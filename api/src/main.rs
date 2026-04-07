@@ -12,6 +12,7 @@ mod signer;
 mod state;
 mod upstream;
 
+use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -20,6 +21,7 @@ use serde::Deserialize;
 use state::AppState;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -29,11 +31,12 @@ async fn main() -> anyhow::Result<()> {
     let config = config::AppConfig::load()?;
     let state = AppState::new(config.clone()).await?;
     upstream::run_startup_probe(&state).await;
+    spawn_cache_cleanup(state.clone());
     let app = Router::new()
         .route("/search", get(search))
-        .route("/book/:book_id", get(book))
-        .route("/toc/:book_id", get(toc))
-        .route("/chapter/:book_id/:chapter_id", get(chapter))
+        .route("/book/{book_id}", get(book))
+        .route("/toc/{book_id}", get(toc))
+        .route("/chapter/{book_id}/{chapter_id}", get(chapter))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -49,8 +52,12 @@ async fn main() -> anyhow::Result<()> {
 
 async fn search(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<SearchQuery>,
+    query: Result<Query<SearchQuery>, QueryRejection>,
 ) -> Json<ApiResponse<models::SearchResponse>> {
+    let Query(query) = match query {
+        Ok(q) => q,
+        Err(e) => return Json(ApiResponse::error(400, format!("请求参数错误: {e}"))),
+    };
     match validate_search_query(query) {
         Ok(validated) => match upstream::search_books(
             &state,
@@ -71,8 +78,12 @@ async fn search(
 
 async fn book(
     State(state): State<Arc<AppState>>,
-    Path(book_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
 ) -> Json<ApiResponse<models::BookInfo>> {
+    let Path(book_id) = match path {
+        Ok(p) => p,
+        Err(e) => return Json(ApiResponse::error(400, format!("路径参数错误: {e}"))),
+    };
     match validate_numeric_id(&book_id, "书籍ID") {
         Ok(book_id) => match upstream::get_book_info(&state, &book_id).await {
             Ok(response) => Json(ApiResponse::success(response)),
@@ -84,8 +95,12 @@ async fn book(
 
 async fn toc(
     State(state): State<Arc<AppState>>,
-    Path(book_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
 ) -> Json<ApiResponse<models::DirectoryResponse>> {
+    let Path(book_id) = match path {
+        Ok(p) => p,
+        Err(e) => return Json(ApiResponse::error(400, format!("路径参数错误: {e}"))),
+    };
     match validate_numeric_id(&book_id, "书籍ID") {
         Ok(book_id) => match upstream::get_toc(&state, &book_id).await {
             Ok(response) => Json(ApiResponse::success(response)),
@@ -97,8 +112,12 @@ async fn toc(
 
 async fn chapter(
     State(state): State<Arc<AppState>>,
-    Path((book_id, chapter_id)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
 ) -> Json<ApiResponse<models::ChapterInfo>> {
+    let Path((book_id, chapter_id)) = match path {
+        Ok(p) => p,
+        Err(e) => return Json(ApiResponse::error(400, format!("路径参数错误: {e}"))),
+    };
     match validate_numeric_id(&book_id, "书籍ID")
         .and_then(|book_id| validate_numeric_id(&chapter_id, "章节ID").map(|chapter_id| (book_id, chapter_id)))
     {
@@ -187,4 +206,17 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+fn spawn_cache_cleanup(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            state.search_cache.sweep_expired();
+            state.directory_cache.sweep_expired();
+            state.book_cache.sweep_expired();
+            state.chapter_cache.sweep_expired();
+        }
+    });
 }

@@ -271,7 +271,7 @@ fn build_register_key_headers(
         format!(
             "{}-{}",
             current_time,
-            rand::thread_rng().gen_range(1..2_000_000_000u32)
+            rand::rng().random_range(1..2_000_000_000u32)
         ),
     );
     headers.insert("x-ss-req-ticket".to_string(), current_time.to_string());
@@ -295,7 +295,7 @@ fn new_register_key_content(server_device_id: &str, value: &str) -> ServiceResul
 
     let key = decode_hex_16(REGISTER_KEY_FIXED_AES_HEX)
         .map_err(|_| ServiceError::internal("registerkey AES key 非法"))?;
-    let iv: [u8; 16] = rand::thread_rng().gen();
+    let iv: [u8; 16] = rand::rng().random();
     let mut buffer = vec![0u8; plaintext.len() + 16];
     buffer[..plaintext.len()].copy_from_slice(&plaintext);
     let encrypted = Aes128CbcEnc::new_from_slices(&key, &iv)

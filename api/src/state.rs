@@ -30,7 +30,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(config: AppConfig) -> Result<Arc<Self>> {
         let http_client = reqwest::Client::builder()
-            .http3_prior_knowledge()
+            .http1_only()
             .no_gzip()
             .connect_timeout(Duration::from_millis(
                 config.fq.upstream.connect_timeout_ms,
@@ -48,6 +48,7 @@ impl AppState {
 
         let search_ttl = duration_from_ms(config.fq.cache.search_ttl_ms);
         let directory_ttl = duration_from_ms(config.fq.cache.directory_ttl_ms);
+        let book_ttl = duration_from_ms(config.fq.cache.book_ttl_ms);
         let chapter_ttl = duration_from_ms(config.fq.cache.chapter_ttl_ms);
         let device_pool = DevicePoolManager::new(
             config.fq.device_profile.clone(),
@@ -96,7 +97,7 @@ impl AppState {
             http_client_fallback,
             search_cache: TtlCache::new(search_ttl),
             directory_cache: TtlCache::new(directory_ttl),
-            book_cache: TtlCache::new(directory_ttl),
+            book_cache: TtlCache::new(book_ttl),
             chapter_cache: TtlCache::new(chapter_ttl),
             pg_chapter_cache,
             register_key_service: RegisterKeyService::new(

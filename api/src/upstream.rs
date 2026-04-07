@@ -468,10 +468,11 @@ async fn execute_signed_json_get(
     let attempt = execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
     let attempt = if attempt.body_text.trim().is_empty() {
         warn!(
-            "http3 upstream returned empty body, retrying over http1: status={}, content_length={}, content_type={}, url={}",
+            "upstream returned empty body, retrying over http1: status={}, content_length={}, content_type={}, content_encoding={:?}, url={}",
             attempt.status.as_u16(),
             attempt.content_length,
             attempt.content_type,
+            attempt.content_encoding,
             attempt.response_url
         );
         execute_signed_json_get_once(&state.http_client_fallback, url, merged_headers).await?
@@ -517,14 +518,35 @@ async fn execute_signed_json_get_once(
     url: &str,
     headers: reqwest::header::HeaderMap,
 ) -> ServiceResult<UpstreamHttpResponse> {
-    let response = client
+    // Build request first so we can inspect what reqwest will actually send
+    let request = client
         .get(url)
         .headers(headers)
-        .send()
+        .build()
+        .map_err(|error| ServiceError::internal(format!("上游请求构建失败: {error}")))?;
+
+    // Log actual request details for debugging
+    {
+        let req_headers: Vec<String> = request
+            .headers()
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("<binary>")))
+            .collect();
+        info!(
+            "upstream request: method={}, url={}, headers=[{}]",
+            request.method(),
+            request.url(),
+            req_headers.join("; ")
+        );
+    }
+
+    let response = client
+        .execute(request)
         .await
         .map_err(|error| ServiceError::internal(format!("上游请求失败: {error}")))?;
 
     let status = response.status();
+    let http_version = format!("{:?}", response.version());
     let response_url = response.url().to_string();
     let content_type = response
         .headers()
@@ -543,10 +565,26 @@ async fn execute_signed_json_get_once(
         .get(reqwest::header::CONTENT_ENCODING)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let all_response_headers: Vec<String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("<binary>")))
+        .collect();
     let body = response
         .bytes()
         .await
         .map_err(|error| ServiceError::internal(format!("上游响应读取失败: {error}")))?;
+
+    if body.is_empty() {
+        warn!(
+            "upstream response body empty: http_version={}, status={}, headers=[{}], url={}",
+            http_version,
+            status.as_u16(),
+            all_response_headers.join("; "),
+            url
+        );
+    }
+
     let body_text = decode_upstream_response(body.as_ref(), content_encoding.as_deref())
         .map_err(|error| ServiceError::internal(format!("上游响应解码失败: {error}")))?;
 
@@ -555,6 +593,7 @@ async fn execute_signed_json_get_once(
         response_url,
         content_type,
         content_length,
+        content_encoding,
         body_len: body.len(),
         body_text,
     })
@@ -874,11 +913,16 @@ fn chapter_context(directory: &DirectoryResponse, chapter_id: &str) -> Option<Ch
         .get(index + 1)
         .map(|item| item.item_id.clone());
     let title = directory.item_data_list.get(index).map(|item| item.title.clone());
+    let is_free = directory
+        .item_data_list
+        .get(index)
+        .and_then(|item| item.is_free)
+        .unwrap_or(index < 5);
     Some(ChapterContext {
         chapter_index: (index + 1) as i32,
         prev_chapter_id: prev,
         next_chapter_id: next,
-        is_free: index < 5,
+        is_free,
         title,
     })
 }
@@ -897,7 +941,7 @@ fn bounded_delay(min_ms: u64, max_ms: u64) -> u64 {
     if min == max {
         min
     } else {
-        rand::thread_rng().gen_range(min..=max)
+        rand::rng().random_range(min..=max)
     }
 }
 
@@ -1088,7 +1132,11 @@ fn truncate_for_log(value: &str, max_len: usize) -> String {
     if value.len() <= max_len {
         value.to_string()
     } else {
-        format!("{}...", &value[..max_len])
+        let mut end = max_len;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &value[..end])
     }
 }
 
@@ -1160,6 +1208,7 @@ struct UpstreamHttpResponse {
     response_url: String,
     content_type: String,
     content_length: String,
+    content_encoding: Option<String>,
     body_len: usize,
     body_text: String,
 }

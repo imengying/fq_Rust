@@ -42,6 +42,13 @@ impl<V: Clone> TtlCache<V> {
             },
         );
     }
+
+    /// Remove all expired entries. Call periodically from a background task.
+    pub fn sweep_expired(&self) {
+        let now = Instant::now();
+        self.entries
+            .retain(|_, entry| entry.expires_at.map(|exp| now < exp).unwrap_or(true));
+    }
 }
 
 fn is_expired(expires_at: Option<Instant>) -> bool {

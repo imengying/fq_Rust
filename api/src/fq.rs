@@ -4,23 +4,123 @@ use chrono::Utc;
 use indexmap::IndexMap;
 use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use url::Url;
 
 pub fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
 
+/// Parameter keys whose values should be percent-encoded.
+/// Must match Java version's ENCODE_WHITELIST exactly.
+const ENCODE_WHITELIST: &[&str] = &[
+    "query",
+    "client_ab_info",
+    "search_source_id",
+    "search_id",
+    "device_type",
+    "resolution",
+    "rom_version",
+];
+
 pub fn build_url(base_url: &str, path: &str, params: &[(String, String)]) -> ServiceResult<String> {
-    let raw = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let mut url = Url::parse(&raw)
-        .map_err(|error| ServiceError::internal(format!("URL 构建失败 {raw}: {error}")))?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        for (key, value) in params {
-            pairs.append_pair(key, value);
+    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    if !params.is_empty() {
+        url.push('?');
+        for (i, (key, value)) in params.iter().enumerate() {
+            if i > 0 {
+                url.push('&');
+            }
+            url.push_str(key);
+            url.push('=');
+            if ENCODE_WHITELIST.contains(&key.as_str()) {
+                url.push_str(&encode_if_needed(value));
+            } else {
+                url.push_str(value);
+            }
         }
     }
-    Ok(url.to_string())
+    Ok(url)
+}
+
+/// Encode value if not already encoded. Exactly matches Java's encodeIfNeeded.
+///
+/// Java's logic:
+/// 1. Try URLDecoder.decode(value) — treats '+' as space, '%XX' as hex
+/// 2. If decoded != value → value is "already encoded", return as-is
+/// 3. Otherwise → URLEncoder.encode(value) — keeps [a-zA-Z0-9.*_-], space→'+', rest→%XX
+fn encode_if_needed(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+    // Step 1: Java URLDecoder.decode — '+' maps to space, '%XX' to byte
+    let decoded = java_url_decode(value);
+    if decoded != value {
+        // Already encoded (decoding changed it), return as-is
+        return value.to_string();
+    }
+    // Step 2: Java URLEncoder.encode
+    java_url_encode(value)
+}
+
+/// Matches `java.net.URLDecoder.decode(value, UTF_8)`.
+/// Replaces '+' with space and decodes '%XX' sequences.
+fn java_url_decode(value: &str) -> String {
+    let mut result = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                result.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                if let (Some(hi), Some(lo)) = (
+                    hex_val(bytes[i + 1]),
+                    hex_val(bytes[i + 2]),
+                ) {
+                    result.push(hi << 4 | lo);
+                    i += 3;
+                } else {
+                    result.push(b'%');
+                    i += 1;
+                }
+            }
+            ch => {
+                result.push(ch);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
+/// Matches `java.net.URLEncoder.encode(value, UTF_8)`.
+/// Keeps: letters, digits, '.', '-', '*', '_'
+/// Space → '+'
+/// Everything else → '%XX' (per byte of UTF-8 encoding)
+fn java_url_encode(value: &str) -> String {
+    let mut result = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        match *byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' | b'*' | b'_' => {
+                result.push(*byte as char);
+            }
+            b' ' => result.push('+'),
+            _ => {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    result
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub fn normalize_install_id(cookie: &str, install_id: &str) -> String {
@@ -68,7 +168,7 @@ pub fn build_common_headers(device: &DeviceProfile) -> IndexMap<String, String> 
     );
     headers.insert(
         "x-reading-request".to_string(),
-        format!("{}-{}", now, rand::thread_rng().gen_range(1..2_000_000_000u32)),
+        format!("{}-{}", now, rand::rng().random_range(1..2_000_000_000u32)),
     );
     headers.insert("sdk-version".to_string(), "2".to_string());
     headers.insert("x-tt-store-region-src".to_string(), "did".to_string());

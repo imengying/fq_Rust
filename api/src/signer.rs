@@ -3,11 +3,13 @@ use crate::fq::now_ms;
 use crate::models::{ServiceError, ServiceResult};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use indexmap::IndexMap;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::task;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct SignerClient {
@@ -38,9 +40,12 @@ impl SignerClient {
                 .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
 
             match process.sign(&url, &headers_text) {
-                Ok(raw) => Ok(SignResult {
-                    headers: parse_signature_result(&raw)?,
-                }),
+                Ok(raw) => {
+                    info!("signer raw output (len={}): {}", raw.len(), truncate(&raw, 800));
+                    Ok(SignResult {
+                        headers: parse_signature_result(&raw)?,
+                    })
+                }
                 Err(error) => {
                     if process.should_restart_after_sign_error(&error)
                         && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
@@ -214,7 +219,11 @@ fn truncate(value: &str, max_len: usize) -> String {
     if value.len() <= max_len {
         value.to_string()
     } else {
-        format!("{}...", &value[..max_len])
+        let mut end = max_len;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &value[..end])
     }
 }
 
@@ -346,14 +355,14 @@ fn parse_signature_result(raw: &str) -> ServiceResult<IndexMap<String, String>> 
     Ok(remove_header_ignore_case(result, "X-Neptune"))
 }
 
+/// Matches Java's HEADER_COLON_PAIR = Pattern.compile("^[A-Za-z0-9-]{1,64}:\\s*.+$")
+static HEADER_COLON_PAIR: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[A-Za-z0-9-]{1,64}:\s*.+$").unwrap());
+
 fn looks_like_colon_pairs(lines: &[&str]) -> bool {
-    lines.iter().any(|line| {
-        let trimmed = line.trim();
-        let Some(index) = trimmed.find(':') else {
-            return false;
-        };
-        index > 0 && index < trimmed.len() - 1
-    })
+    lines
+        .iter()
+        .any(|line| HEADER_COLON_PAIR.is_match(line.trim()))
 }
 
 fn put_header(result: &mut IndexMap<String, String>, raw_key: &str, raw_value: &str) {

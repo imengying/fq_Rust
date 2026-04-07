@@ -55,6 +55,7 @@ pub struct SignerConfig {
 pub struct CacheConfig {
     pub search_ttl_ms: u64,
     pub directory_ttl_ms: u64,
+    pub book_ttl_ms: u64,
     pub chapter_ttl_ms: u64,
     pub register_key_ttl_ms: u64,
     pub register_key_max_entries: u64,
@@ -173,6 +174,7 @@ impl Default for CacheConfig {
         Self {
             search_ttl_ms: 45_000,
             directory_ttl_ms: 600_000,
+            book_ttl_ms: 600_000,
             chapter_ttl_ms: 600_000,
             register_key_ttl_ms: 3_600_000,
             register_key_max_entries: 128,
@@ -264,6 +266,10 @@ impl AppConfig {
         set_u64(
             &mut self.fq.signer.restart_cooldown_ms,
             "FQRS_SIGNER_RESTART_COOLDOWN_MS",
+        );
+        set_u64(
+            &mut self.fq.cache.book_ttl_ms,
+            "FQRS_BOOK_CACHE_TTL_MS",
         );
         set_u64(
             &mut self.fq.cache.register_key_ttl_ms,
@@ -419,6 +425,15 @@ fn inherit_string(target: &mut String, fallback: &str) {
 }
 
 fn load_from_disk() -> Result<AppConfig> {
+    if let Ok(custom_path) = env::var("FQRS_CONFIG_PATH") {
+        let custom_path = custom_path.trim();
+        if !custom_path.is_empty() && Path::new(custom_path).exists() {
+            let file = File::open(custom_path)?;
+            let config = serde_yaml::from_reader(file)?;
+            return Ok(config);
+        }
+    }
+
     const PATHS: [&str; 1] = ["configs/config.yaml"];
 
     for path in PATHS {
