@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod content;
+mod encoding;
 mod fq;
 mod models;
 mod registerkey;

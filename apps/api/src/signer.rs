@@ -1,4 +1,5 @@
 use crate::config::SignerConfig;
+use crate::fq::now_ms;
 use crate::models::{ServiceError, ServiceResult};
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -6,7 +7,6 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
 use tracing::warn;
 use uuid::Uuid;
@@ -254,13 +254,6 @@ fn truncate(value: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &value[..max_len])
     }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 fn build_signature_input_headers(headers: &IndexMap<String, String>) -> String {

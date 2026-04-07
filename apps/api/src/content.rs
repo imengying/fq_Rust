@@ -4,10 +4,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
-use flate2::read::GzDecoder;
+use crate::encoding::{decode_gzip_or_utf8, decode_hex_16};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::io::Read;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
@@ -28,7 +27,7 @@ pub fn decrypt_and_decompress_content(encrypted_content: &str, key_hex: &str) ->
     }
 
     let (iv, ciphertext) = raw.split_at(16);
-    let key = decode_hex(key_hex)?;
+    let key = decode_hex_16(key_hex)?;
     let mut buffer = ciphertext.to_vec();
     let decrypted = Aes128CbcDec::new_from_slices(&key, iv)
         .map_err(|error| anyhow!("AES 初始化失败: {error}"))?
@@ -70,38 +69,6 @@ pub fn extract_title(html_content: &str) -> Option<String> {
     }
 }
 
-fn decode_hex(input: &str) -> Result<Vec<u8>> {
-    let normalized = input.trim();
-    if normalized.len() != 32 {
-        return Err(anyhow!("Key length mismatch"));
-    }
-    let mut bytes = Vec::with_capacity(16);
-    let chars: Vec<char> = normalized.chars().collect();
-    for pair in chars.chunks(2) {
-        let hi = pair
-            .first()
-            .and_then(|value| value.to_digit(16))
-            .ok_or_else(|| anyhow!("非法十六进制 key"))?;
-        let lo = pair
-            .get(1)
-            .and_then(|value| value.to_digit(16))
-            .ok_or_else(|| anyhow!("非法十六进制 key"))?;
-        bytes.push(((hi << 4) | lo) as u8);
-    }
-    Ok(bytes)
-}
-
-fn decode_gzip_or_utf8(raw: &[u8]) -> Result<String> {
-    if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-        let mut decoder = GzDecoder::new(raw);
-        let mut output = String::new();
-        decoder.read_to_string(&mut output)?;
-        return Ok(output);
-    }
-
-    Ok(String::from_utf8_lossy(raw).to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,7 +87,7 @@ mod tests {
     #[test]
     fn decrypts_base64_aes_payload() {
         let key_hex = "0123456789ABCDEF0123456789ABCDEF";
-        let key = decode_hex(key_hex).unwrap();
+        let key = decode_hex_16(key_hex).unwrap();
         let iv = [7u8; 16];
         let plaintext = b"plain text payload";
         let mut buffer = [0u8; 64];

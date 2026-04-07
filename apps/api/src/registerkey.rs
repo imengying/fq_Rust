@@ -1,4 +1,5 @@
 use crate::config::{DeviceProfile, UpstreamConfig};
+use crate::encoding::{decode_gzip_or_utf8, decode_hex_16};
 use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{ServiceError, ServiceResult};
 use crate::signer::SignerClient;
@@ -8,11 +9,9 @@ use base64::Engine;
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use dashmap::DashMap;
-use flate2::read::GzDecoder;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::Read;
 use std::sync::Arc;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
@@ -215,7 +214,8 @@ async fn fetch_register_key(
         .bytes()
         .await
         .map_err(|error| ServiceError::internal(format!("registerkey upstream 响应读取失败: {error}")))?;
-    let response_body = decode_gzip_or_utf8(body.as_ref())?;
+    let response_body = decode_gzip_or_utf8(body.as_ref())
+        .map_err(|error| ServiceError::internal(format!("registerkey upstream 解压失败: {error}")))?;
 
     if response_body.trim().is_empty() {
         return Err(ServiceError::internal("registerkey upstream 返回空响应"));
@@ -292,7 +292,8 @@ fn new_register_key_content(server_device_id: &str, value: &str) -> ServiceResul
     plaintext.extend_from_slice(&device_id.to_le_bytes());
     plaintext.extend_from_slice(&numeric_value.to_le_bytes());
 
-    let key = decode_hex(REGISTER_KEY_FIXED_AES_HEX)?;
+    let key = decode_hex_16(REGISTER_KEY_FIXED_AES_HEX)
+        .map_err(|_| ServiceError::internal("registerkey AES key 非法"))?;
     let iv: [u8; 16] = rand::thread_rng().gen();
     let mut buffer = vec![0u8; plaintext.len() + 16];
     buffer[..plaintext.len()].copy_from_slice(&plaintext);
@@ -315,7 +316,8 @@ fn extract_real_key(registerkey_response_key: &str) -> ServiceResult<String> {
     }
 
     let (iv, ciphertext) = raw.split_at(16);
-    let key = decode_hex(REGISTER_KEY_FIXED_AES_HEX)?;
+    let key = decode_hex_16(REGISTER_KEY_FIXED_AES_HEX)
+        .map_err(|_| ServiceError::internal("registerkey AES key 非法"))?;
     let mut buffer = ciphertext.to_vec();
     let decrypted = Aes128CbcDec::new_from_slices(&key, iv)
         .map_err(|error| ServiceError::internal(format!("registerkey AES 初始化失败: {error}")))?
@@ -327,39 +329,6 @@ fn extract_real_key(registerkey_response_key: &str) -> ServiceResult<String> {
         return Err(ServiceError::internal("registerkey 解密后的密钥长度不足"));
     }
     Ok(full_key[..32].to_string())
-}
-
-fn decode_hex(input: &str) -> ServiceResult<Vec<u8>> {
-    let normalized = input.trim();
-    if normalized.len() != 32 {
-        return Err(ServiceError::internal("registerkey AES key 长度非法"));
-    }
-    let mut bytes = Vec::with_capacity(16);
-    let chars: Vec<char> = normalized.chars().collect();
-    for pair in chars.chunks(2) {
-        let hi = pair
-            .first()
-            .and_then(|value| value.to_digit(16))
-            .ok_or_else(|| ServiceError::internal("registerkey AES key 非法"))?;
-        let lo = pair
-            .get(1)
-            .and_then(|value| value.to_digit(16))
-            .ok_or_else(|| ServiceError::internal("registerkey AES key 非法"))?;
-        bytes.push(((hi << 4) | lo) as u8);
-    }
-    Ok(bytes)
-}
-
-fn decode_gzip_or_utf8(raw: &[u8]) -> ServiceResult<String> {
-    if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-        let mut decoder = GzDecoder::new(raw);
-        let mut output = String::new();
-        decoder
-            .read_to_string(&mut output)
-            .map_err(|error| ServiceError::internal(format!("GZIP 解压失败: {error}")))?;
-        return Ok(output);
-    }
-    Ok(String::from_utf8_lossy(raw).to_string())
 }
 
 fn fingerprint(profile: &DeviceProfile) -> String {
