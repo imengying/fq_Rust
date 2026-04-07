@@ -1,5 +1,6 @@
 use crate::config::{DeviceProfile, UpstreamDevice};
 use crate::content::{decrypt_and_decompress_content, extract_text, extract_title};
+use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{
     BookInfo, BookItem, ChapterInfo, DirectoryItemData, DirectoryResponse, SearchResponse,
     ServiceError, ServiceResult, UpstreamBookInfo,
@@ -8,12 +9,10 @@ use crate::registerkey::RegisterKeyResolveResult;
 use crate::state::AppState;
 use indexmap::IndexMap;
 use rand::Rng;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
-use url::Url;
 use uuid::Uuid;
 
 const SEARCH_PATH: &str = "/reading/bookapi/search/tab/v";
@@ -247,7 +246,7 @@ async fn resolve_register_key(
         .register_key_service
         .resolve(
             &state.http_client,
-            &state.sidecar_client,
+            &state.signer_client,
             &state.config.fq.upstream,
             &state.config.fq.device_profile,
             required_keyver,
@@ -279,7 +278,7 @@ async fn execute_signed_json_get(
     url: &str,
     headers: IndexMap<String, String>,
 ) -> ServiceResult<Value> {
-    let sign = state.sidecar_client.sign(url, &headers).await?;
+    let sign = state.signer_client.sign(url, &headers).await?;
     let response = state
         .http_client
         .get(url)
@@ -305,55 +304,6 @@ async fn execute_signed_json_get(
 
     serde_json::from_str(&body)
         .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))
-}
-
-fn merge_headers(
-    original: &IndexMap<String, String>,
-    signed: &IndexMap<String, String>,
-) -> ServiceResult<HeaderMap> {
-    let mut headers = HeaderMap::new();
-    for (key, value) in original.iter().chain(signed.iter()) {
-        let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
-            ServiceError::internal(format!("非法请求头名称 {key}: {error}"))
-        })?;
-        let header_value = HeaderValue::from_str(value).map_err(|error| {
-            ServiceError::internal(format!("非法请求头值 {key}: {error}"))
-        })?;
-        headers.insert(header_name, header_value);
-    }
-    Ok(headers)
-}
-
-fn build_common_headers(device: &DeviceProfile) -> IndexMap<String, String> {
-    let now = now_ms();
-    let mut headers = IndexMap::new();
-    headers.insert(
-        "accept".to_string(),
-        "application/json; charset=utf-8,application/x-protobuf".to_string(),
-    );
-    headers.insert(
-        "cookie".to_string(),
-        normalize_install_id(&device.cookie, &device.device.install_id),
-    );
-    headers.insert("user-agent".to_string(), device.user_agent.clone());
-    headers.insert("accept-encoding".to_string(), "gzip".to_string());
-    headers.insert("x-xs-from-web".to_string(), "0".to_string());
-    headers.insert(
-        "x-vc-bdturing-sdk-version".to_string(),
-        "3.7.2.cn".to_string(),
-    );
-    headers.insert(
-        "x-reading-request".to_string(),
-        format!("{}-{}", now, rand::thread_rng().gen_range(1..2_000_000_000u32)),
-    );
-    headers.insert("sdk-version".to_string(), "2".to_string());
-    headers.insert("x-tt-store-region-src".to_string(), "did".to_string());
-    headers.insert("x-tt-store-region".to_string(), "cn-zj".to_string());
-    headers.insert("lc".to_string(), "101".to_string());
-    headers.insert("x-ss-req-ticket".to_string(), now.to_string());
-    headers.insert("passport-sdk-version".to_string(), "50564".to_string());
-    headers.insert("x-ss-dp".to_string(), device.device.aid.clone());
-    headers
 }
 
 fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
@@ -474,61 +424,6 @@ fn build_batch_full_params(
     params.push(("book_id".to_string(), book_id.to_string()));
     params.push(("req_type".to_string(), "0".to_string()));
     params
-}
-
-fn build_common_params(device: &DeviceProfile) -> Vec<(String, String)> {
-    let now = now_ms();
-    vec![
-        ("iid".to_string(), device.device.install_id.clone()),
-        ("device_id".to_string(), device.device.device_id.clone()),
-        ("ac".to_string(), "wifi".to_string()),
-        ("channel".to_string(), "googleplay".to_string()),
-        ("aid".to_string(), device.device.aid.clone()),
-        ("app_name".to_string(), "novelapp".to_string()),
-        ("version_code".to_string(), device.device.version_code.clone()),
-        ("version_name".to_string(), device.device.version_name.clone()),
-        ("device_platform".to_string(), "android".to_string()),
-        ("os".to_string(), "android".to_string()),
-        ("ssmix".to_string(), "a".to_string()),
-        ("device_type".to_string(), device.device.device_type.clone()),
-        ("device_brand".to_string(), device.device.device_brand.clone()),
-        ("language".to_string(), "zh".to_string()),
-        ("os_api".to_string(), device.device.os_api.clone()),
-        ("os_version".to_string(), device.device.os_version.clone()),
-        (
-            "manifest_version_code".to_string(),
-            device.device.version_code.clone(),
-        ),
-        ("resolution".to_string(), device.device.resolution.clone()),
-        ("dpi".to_string(), device.device.dpi.clone()),
-        (
-            "update_version_code".to_string(),
-            device.device.update_version_code.clone(),
-        ),
-        ("_rticket".to_string(), now.to_string()),
-        ("host_abi".to_string(), device.device.host_abi.clone()),
-        ("dragon_device_type".to_string(), "phone".to_string()),
-        ("pv_player".to_string(), device.device.version_code.clone()),
-        ("compliance_status".to_string(), "0".to_string()),
-        ("need_personal_recommend".to_string(), "1".to_string()),
-        ("player_so_load".to_string(), "1".to_string()),
-        ("is_android_pad_screen".to_string(), "0".to_string()),
-        ("rom_version".to_string(), device.device.rom_version.clone()),
-        ("cdid".to_string(), device.device.cdid.clone()),
-    ]
-}
-
-fn build_url(base_url: &str, path: &str, params: &[(String, String)]) -> ServiceResult<String> {
-    let raw = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let mut url = Url::parse(&raw)
-        .map_err(|error| ServiceError::internal(format!("URL 构建失败 {raw}: {error}")))?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        for (key, value) in params {
-            pairs.append_pair(key, value);
-        }
-    }
-    Ok(url.to_string())
 }
 
 fn parse_search_response(root: &Value, tab_type: u32) -> SearchResponse {
@@ -732,35 +627,6 @@ fn chapter_context(directory: &DirectoryResponse, chapter_id: &str) -> Option<Ch
         is_free: index < 5,
         title,
     })
-}
-
-fn normalize_install_id(cookie: &str, install_id: &str) -> String {
-    if install_id.trim().is_empty() {
-        return cookie.to_string();
-    }
-    let key = "install_id=";
-    if let Some(position) = cookie.to_ascii_lowercase().find(key) {
-        let value_start = position + key.len();
-        let value_end = cookie[value_start..]
-            .find(';')
-            .map(|offset| value_start + offset)
-            .unwrap_or(cookie.len());
-        let mut output = String::new();
-        output.push_str(&cookie[..value_start]);
-        output.push_str(install_id);
-        output.push_str(&cookie[value_end..]);
-        output
-    } else if cookie.trim().is_empty() {
-        format!("{key}{install_id}")
-    } else if cookie.trim().ends_with(';') {
-        format!("{} {key}{install_id};", cookie.trim())
-    } else {
-        format!("{}; {key}{install_id};", cookie.trim())
-    }
-}
-
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
 }
 
 fn bool01(value: bool) -> String {
@@ -1025,14 +891,5 @@ mod tests {
         assert_eq!(parsed.total, 1);
         assert_eq!(parsed.search_id.as_deref(), Some("sid-1"));
         assert_eq!(parsed.books[0].book_name, "测试书");
-    }
-
-    #[test]
-    fn normalizes_install_id() {
-        let cookie = "store-region=cn-zj; store-region-src=did";
-        assert_eq!(
-            normalize_install_id(cookie, "123"),
-            "store-region=cn-zj; store-region-src=did; install_id=123;"
-        );
     }
 }

@@ -1,22 +1,19 @@
 use crate::config::{DeviceProfile, UpstreamConfig};
+use crate::fq::{build_common_headers, build_common_params, build_url, merge_headers, now_ms};
 use crate::models::{ServiceError, ServiceResult};
-use crate::sidecar::SidecarClient;
+use crate::signer::SignerClient;
 use aes::Aes128;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use chrono::Utc;
 use dashmap::DashMap;
 use flate2::read::GzDecoder;
-use indexmap::IndexMap;
 use rand::Rng;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::sync::Arc;
-use url::Url;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 type Aes128CbcEnc = cbc::Encryptor<Aes128>;
@@ -68,7 +65,7 @@ impl RegisterKeyService {
     pub async fn resolve(
         &self,
         http_client: &reqwest::Client,
-        sidecar_client: &SidecarClient,
+        signer_client: &SignerClient,
         upstream: &UpstreamConfig,
         profile: &DeviceProfile,
         required_keyver: Option<i64>,
@@ -87,7 +84,7 @@ impl RegisterKeyService {
             self.current_by_fingerprint.remove(&fingerprint);
         }
 
-        let fetched = fetch_register_key(http_client, sidecar_client, upstream, profile).await?;
+        let fetched = fetch_register_key(http_client, signer_client, upstream, profile).await?;
         if let Some(keyver) = normalized_keyver {
             if fetched.keyver != keyver {
                 return Err(ServiceError::new(1101, "registerkey version mismatch"));
@@ -192,14 +189,14 @@ impl RegisterKeyService {
 
 async fn fetch_register_key(
     http_client: &reqwest::Client,
-    sidecar_client: &SidecarClient,
+    signer_client: &SignerClient,
     upstream: &UpstreamConfig,
     profile: &DeviceProfile,
 ) -> ServiceResult<FetchedRegisterKey> {
     let current_time = now_ms();
     let url = build_register_key_url(upstream, profile, current_time)?;
     let headers = build_register_key_headers(profile, current_time);
-    let signed = sidecar_client.sign(&url, &headers).await?;
+    let signed = signer_client.sign(&url, &headers).await?;
 
     let payload = FqRegisterKeyPayload {
         content: new_register_key_content(&profile.device.device_id, "0")?,
@@ -256,67 +253,18 @@ fn build_register_key_url(
     profile: &DeviceProfile,
     current_time: i64,
 ) -> ServiceResult<String> {
-    let params = vec![
-        ("iid".to_string(), profile.device.install_id.clone()),
-        ("device_id".to_string(), profile.device.device_id.clone()),
-        ("ac".to_string(), "wifi".to_string()),
-        ("channel".to_string(), "googleplay".to_string()),
-        ("aid".to_string(), profile.device.aid.clone()),
-        ("app_name".to_string(), "novelapp".to_string()),
-        ("version_code".to_string(), profile.device.version_code.clone()),
-        ("version_name".to_string(), profile.device.version_name.clone()),
-        ("device_platform".to_string(), "android".to_string()),
-        ("os".to_string(), "android".to_string()),
-        ("ssmix".to_string(), "a".to_string()),
-        ("device_type".to_string(), profile.device.device_type.clone()),
-        ("device_brand".to_string(), profile.device.device_brand.clone()),
-        ("language".to_string(), "zh".to_string()),
-        ("os_api".to_string(), profile.device.os_api.clone()),
-        ("os_version".to_string(), profile.device.os_version.clone()),
-        (
-            "manifest_version_code".to_string(),
-            profile.device.version_code.clone(),
-        ),
-        ("resolution".to_string(), profile.device.resolution.clone()),
-        ("dpi".to_string(), profile.device.dpi.clone()),
-        (
-            "update_version_code".to_string(),
-            profile.device.update_version_code.clone(),
-        ),
-        ("_rticket".to_string(), current_time.to_string()),
-        ("host_abi".to_string(), profile.device.host_abi.clone()),
-        ("dragon_device_type".to_string(), "phone".to_string()),
-        ("pv_player".to_string(), profile.device.version_code.clone()),
-        ("compliance_status".to_string(), "0".to_string()),
-        ("need_personal_recommend".to_string(), "1".to_string()),
-        ("player_so_load".to_string(), "1".to_string()),
-        ("is_android_pad_screen".to_string(), "0".to_string()),
-        ("rom_version".to_string(), profile.device.rom_version.clone()),
-        ("cdid".to_string(), profile.device.cdid.clone()),
-    ];
+    let mut params = build_common_params(profile);
+    if let Some(position) = params.iter().position(|(key, _)| key == "_rticket") {
+        params[position].1 = current_time.to_string();
+    }
     build_url(&upstream.base_url, REGISTER_KEY_PATH, &params)
 }
 
 fn build_register_key_headers(
     profile: &DeviceProfile,
     current_time: i64,
-) -> IndexMap<String, String> {
-    let mut headers = IndexMap::new();
-    headers.insert(
-        "accept".to_string(),
-        "application/json; charset=utf-8,application/x-protobuf".to_string(),
-    );
-    headers.insert(
-        "cookie".to_string(),
-        normalize_install_id(&profile.cookie, &profile.device.install_id),
-    );
-    headers.insert("user-agent".to_string(), profile.user_agent.clone());
-    headers.insert("accept-encoding".to_string(), "gzip".to_string());
-    headers.insert("x-xs-from-web".to_string(), "0".to_string());
-    headers.insert(
-        "x-vc-bdturing-sdk-version".to_string(),
-        "3.7.2.cn".to_string(),
-    );
+) -> indexmap::IndexMap<String, String> {
+    let mut headers = build_common_headers(profile);
     headers.insert(
         "x-reading-request".to_string(),
         format!(
@@ -325,70 +273,9 @@ fn build_register_key_headers(
             rand::thread_rng().gen_range(1..2_000_000_000u32)
         ),
     );
-    headers.insert("sdk-version".to_string(), "2".to_string());
-    headers.insert("x-tt-store-region-src".to_string(), "did".to_string());
-    headers.insert("x-tt-store-region".to_string(), "cn-zj".to_string());
-    headers.insert("lc".to_string(), "101".to_string());
     headers.insert("x-ss-req-ticket".to_string(), current_time.to_string());
-    headers.insert("passport-sdk-version".to_string(), "50564".to_string());
-    headers.insert("x-ss-dp".to_string(), profile.device.aid.clone());
     headers.insert("content-type".to_string(), "application/json".to_string());
     headers
-}
-
-fn merge_headers(
-    original: &IndexMap<String, String>,
-    signed: &IndexMap<String, String>,
-) -> ServiceResult<HeaderMap> {
-    let mut headers = HeaderMap::new();
-    for (key, value) in original.iter().chain(signed.iter()) {
-        let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
-            ServiceError::internal(format!("非法请求头名称 {key}: {error}"))
-        })?;
-        let header_value = HeaderValue::from_str(value).map_err(|error| {
-            ServiceError::internal(format!("非法请求头值 {key}: {error}"))
-        })?;
-        headers.insert(header_name, header_value);
-    }
-    Ok(headers)
-}
-
-fn build_url(base_url: &str, path: &str, params: &[(String, String)]) -> ServiceResult<String> {
-    let raw = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let mut url = Url::parse(&raw)
-        .map_err(|error| ServiceError::internal(format!("URL 构建失败 {raw}: {error}")))?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        for (key, value) in params {
-            pairs.append_pair(key, value);
-        }
-    }
-    Ok(url.to_string())
-}
-
-fn normalize_install_id(cookie: &str, install_id: &str) -> String {
-    if install_id.trim().is_empty() {
-        return cookie.to_string();
-    }
-    let key = "install_id=";
-    if let Some(position) = cookie.to_ascii_lowercase().find(key) {
-        let value_start = position + key.len();
-        let value_end = cookie[value_start..]
-            .find(';')
-            .map(|offset| value_start + offset)
-            .unwrap_or(cookie.len());
-        let mut output = String::new();
-        output.push_str(&cookie[..value_start]);
-        output.push_str(install_id);
-        output.push_str(&cookie[value_end..]);
-        output
-    } else if cookie.trim().is_empty() {
-        format!("{key}{install_id}")
-    } else if cookie.trim().ends_with(';') {
-        format!("{} {key}{install_id};", cookie.trim())
-    } else {
-        format!("{}; {key}{install_id};", cookie.trim())
-    }
 }
 
 fn new_register_key_content(server_device_id: &str, value: &str) -> ServiceResult<String> {
@@ -521,10 +408,6 @@ fn compute_expires_at_ms(ttl_ms: u64) -> i64 {
     } else {
         now_ms().saturating_add(ttl_ms as i64)
     }
-}
-
-fn now_ms() -> i64 {
-    Utc::now().timestamp_millis()
 }
 
 struct FetchedRegisterKey {

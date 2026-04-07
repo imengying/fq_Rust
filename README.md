@@ -101,7 +101,7 @@ docker compose up --build
 
 - [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
-- [sidecar.rs](/home/mengying/文档/code/fq_Rust/apps/api/src/sidecar.rs)
+- [signer.rs](/home/mengying/文档/code/fq_Rust/apps/api/src/signer.rs)
 - [SidecarWorker.java](/home/mengying/文档/code/fq_Rust/sidecar/src/main/java/com/mengying/fqnovel/SidecarWorker.java)
 
 ## Docker Hub 发布

@@ -2,7 +2,7 @@ use crate::cache::TtlCache;
 use crate::config::AppConfig;
 use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
 use crate::registerkey::RegisterKeyService;
-use crate::sidecar::SidecarClient;
+use crate::signer::SignerClient;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use std::time::Duration;
 pub struct AppState {
     pub config: Arc<AppConfig>,
     pub http_client: reqwest::Client,
-    pub sidecar_client: SidecarClient,
+    pub signer_client: SignerClient,
     pub search_cache: TtlCache<SearchResponse>,
     pub directory_cache: TtlCache<DirectoryResponse>,
     pub book_cache: TtlCache<BookInfo>,
@@ -34,7 +34,7 @@ impl AppState {
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
-            sidecar_client: SidecarClient::new(config.fq.sidecar.clone())
+            signer_client: SignerClient::new(config.fq.sidecar.clone())
                 .map_err(|error| anyhow!(error.message))?,
             http_client,
             search_cache: TtlCache::new(search_ttl),
