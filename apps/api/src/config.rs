@@ -22,7 +22,6 @@ pub struct ServerConfig {
 #[serde(default)]
 pub struct FqConfig {
     pub upstream: UpstreamConfig,
-    #[serde(alias = "sidecar")]
     pub signer: SignerConfig,
     pub cache: CacheConfig,
     pub search: SearchConfig,
@@ -224,16 +223,10 @@ impl AppConfig {
             &mut self.fq.upstream.read_timeout_ms,
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
-        set_command_any(
-            &mut self.fq.signer.command,
-            &["FQRS_SIGNER_COMMAND", "FQRS_SIDECAR_COMMAND"],
-        );
-        set_u64_any(
+        set_command(&mut self.fq.signer.command, "FQRS_SIGNER_COMMAND");
+        set_u64(
             &mut self.fq.signer.restart_cooldown_ms,
-            &[
-                "FQRS_SIGNER_RESTART_COOLDOWN_MS",
-                "FQRS_SIDECAR_RESTART_COOLDOWN_MS",
-            ],
+            "FQRS_SIGNER_RESTART_COOLDOWN_MS",
         );
         set_u64(
             &mut self.fq.cache.register_key_ttl_ms,
@@ -316,17 +309,6 @@ fn set_u64(target: &mut u64, key: &str) {
     }
 }
 
-fn set_u64_any(target: &mut u64, keys: &[&str]) {
-    for key in keys {
-        if let Ok(value) = env::var(key) {
-            if let Ok(parsed) = value.parse::<u64>() {
-                *target = parsed;
-                return;
-            }
-        }
-    }
-}
-
 fn set_u16(target: &mut u16, key: &str) {
     if let Ok(value) = env::var(key) {
         if let Ok(parsed) = value.parse::<u16>() {
@@ -344,22 +326,6 @@ fn set_command(target: &mut Vec<String>, key: &str) {
             .collect();
         if !parsed.is_empty() {
             *target = parsed;
-        }
-    }
-}
-
-fn set_command_any(target: &mut Vec<String>, keys: &[&str]) {
-    for key in keys {
-        if let Ok(value) = env::var(key) {
-            let parsed: Vec<String> = value
-                .split_whitespace()
-                .filter(|item| !item.trim().is_empty())
-                .map(ToString::to_string)
-                .collect();
-            if !parsed.is_empty() {
-                *target = parsed;
-                return;
-            }
         }
     }
 }

@@ -54,7 +54,6 @@ fq:
 ```
 
 也可以用环境变量 `FQRS_SIGNER_COMMAND` 覆盖。
-当前仍兼容旧的 `fq.sidecar` 和 `FQRS_SIDECAR_*`。
 
 ## 本地运行
 
