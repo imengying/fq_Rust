@@ -70,16 +70,6 @@ public final class TempFileUtils {
         }
     }
 
-    /**
-     * 清理所有临时文件
-     */
-    public static synchronized void cleanup() {
-        for (File file : TEMP_FILES.values()) {
-            deleteFileSafely(file);
-        }
-        TEMP_FILES.clear();
-    }
-
     private static String md5Key(String path) {
         try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
@@ -100,18 +90,5 @@ public final class TempFileUtils {
             return "";
         }
         return path.substring(dotIndex);
-    }
-
-    private static void deleteFileSafely(File file) {
-        if (file == null) {
-            return;
-        }
-        try {
-            if (file.exists() && !file.delete()) {
-                file.deleteOnExit();
-            }
-        } catch (Exception e) {
-            log.warn("删除临时文件失败: {}", file.getAbsolutePath(), e);
-        }
     }
 }
