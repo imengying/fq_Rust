@@ -34,7 +34,7 @@ impl AppState {
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
-            signer_client: SignerClient::new(config.fq.sidecar.clone())
+            signer_client: SignerClient::new(config.fq.signer.clone())
                 .map_err(|error| anyhow!(error.message))?,
             http_client,
             search_cache: TtlCache::new(search_ttl),

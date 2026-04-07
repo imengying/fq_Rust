@@ -22,7 +22,8 @@ pub struct ServerConfig {
 #[serde(default)]
 pub struct FqConfig {
     pub upstream: UpstreamConfig,
-    pub sidecar: SidecarConfig,
+    #[serde(alias = "sidecar")]
+    pub signer: SignerConfig,
     pub cache: CacheConfig,
     pub search: SearchConfig,
     pub device_profile: DeviceProfile,
@@ -39,7 +40,7 @@ pub struct UpstreamConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct SidecarConfig {
+pub struct SignerConfig {
     pub command: Vec<String>,
     pub restart_cooldown_ms: u64,
 }
@@ -112,7 +113,7 @@ impl Default for FqConfig {
     fn default() -> Self {
         Self {
             upstream: UpstreamConfig::default(),
-            sidecar: SidecarConfig::default(),
+            signer: SignerConfig::default(),
             cache: CacheConfig::default(),
             search: SearchConfig::default(),
             device_profile: DeviceProfile::default(),
@@ -131,7 +132,7 @@ impl Default for UpstreamConfig {
     }
 }
 
-impl Default for SidecarConfig {
+impl Default for SignerConfig {
     fn default() -> Self {
         Self {
             command: vec![
@@ -223,10 +224,16 @@ impl AppConfig {
             &mut self.fq.upstream.read_timeout_ms,
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
-        set_command(&mut self.fq.sidecar.command, "FQRS_SIDECAR_COMMAND");
-        set_u64(
-            &mut self.fq.sidecar.restart_cooldown_ms,
-            "FQRS_SIDECAR_RESTART_COOLDOWN_MS",
+        set_command_any(
+            &mut self.fq.signer.command,
+            &["FQRS_SIGNER_COMMAND", "FQRS_SIDECAR_COMMAND"],
+        );
+        set_u64_any(
+            &mut self.fq.signer.restart_cooldown_ms,
+            &[
+                "FQRS_SIGNER_RESTART_COOLDOWN_MS",
+                "FQRS_SIDECAR_RESTART_COOLDOWN_MS",
+            ],
         );
         set_u64(
             &mut self.fq.cache.register_key_ttl_ms,
@@ -242,8 +249,8 @@ impl AppConfig {
         if self.server.port == 0 {
             return Err(anyhow!("server.port 不能为空"));
         }
-        if self.fq.sidecar.command.is_empty() {
-            return Err(anyhow!("fq.sidecar.command 不能为空"));
+        if self.fq.signer.command.is_empty() {
+            return Err(anyhow!("fq.signer.command 不能为空"));
         }
         if self.fq.device_profile.device.device_id.trim().is_empty() {
             return Err(anyhow!("fq.device_profile.device.device_id 不能为空"));
@@ -309,6 +316,17 @@ fn set_u64(target: &mut u64, key: &str) {
     }
 }
 
+fn set_u64_any(target: &mut u64, keys: &[&str]) {
+    for key in keys {
+        if let Ok(value) = env::var(key) {
+            if let Ok(parsed) = value.parse::<u64>() {
+                *target = parsed;
+                return;
+            }
+        }
+    }
+}
+
 fn set_u16(target: &mut u16, key: &str) {
     if let Ok(value) = env::var(key) {
         if let Ok(parsed) = value.parse::<u16>() {
@@ -326,6 +344,22 @@ fn set_command(target: &mut Vec<String>, key: &str) {
             .collect();
         if !parsed.is_empty() {
             *target = parsed;
+        }
+    }
+}
+
+fn set_command_any(target: &mut Vec<String>, keys: &[&str]) {
+    for key in keys {
+        if let Ok(value) = env::var(key) {
+            let parsed: Vec<String> = value
+                .split_whitespace()
+                .filter(|item| !item.trim().is_empty())
+                .map(ToString::to_string)
+                .collect();
+            if !parsed.is_empty() {
+                *target = parsed;
+                return;
+            }
         }
     }
 }

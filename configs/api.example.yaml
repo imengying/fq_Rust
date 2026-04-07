@@ -8,7 +8,7 @@ fq:
     search_base_url: https://api5-normal-sinfonlinec.fqnovel.com
     connect_timeout_ms: 15000
     read_timeout_ms: 30000
-  sidecar:
+  signer:
     command:
       - java
       - --enable-native-access=ALL-UNNAMED

@@ -37,15 +37,15 @@ Java worker 不对外提供 HTTP 接口。
 关键项：
 
 - `fq.upstream`: 番茄上游地址与超时
-- `fq.sidecar.command`: Rust 拉起 Java worker 的命令
-- `fq.sidecar.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
+- `fq.signer.command`: Rust 拉起 Java worker 的命令
+- `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
 - `fq.device_profile`: 当前默认设备信息
 
 默认 worker 命令是：
 
 ```yaml
 fq:
-  sidecar:
+  signer:
     command:
       - java
       - --enable-native-access=ALL-UNNAMED
@@ -53,7 +53,8 @@ fq:
       - /app/fq-sidecar.jar
 ```
 
-也可以用环境变量 `FQRS_SIDECAR_COMMAND` 覆盖。
+也可以用环境变量 `FQRS_SIGNER_COMMAND` 覆盖。
+当前仍兼容旧的 `fq.sidecar` 和 `FQRS_SIDECAR_*`。
 
 ## 本地运行
 

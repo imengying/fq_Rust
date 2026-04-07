@@ -1,4 +1,4 @@
-use crate::config::SidecarConfig;
+use crate::config::SignerConfig;
 use crate::models::{ServiceError, ServiceResult};
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub struct SignResult {
 }
 
 impl SignerClient {
-    pub fn new(config: SidecarConfig) -> ServiceResult<Self> {
+    pub fn new(config: SignerConfig) -> ServiceResult<Self> {
         let mut process = SignerProcess::new(config.command, config.restart_cooldown_ms);
         process.ensure_started()?;
         Ok(Self {
@@ -170,7 +170,7 @@ impl SignerProcess {
         let binary = self
             .command
             .first()
-            .ok_or_else(|| ServiceError::internal("fq.sidecar.command 不能为空"))?
+            .ok_or_else(|| ServiceError::internal("fq.signer.command 不能为空"))?
             .clone();
         let mut command = Command::new(binary);
         if self.command.len() > 1 {
