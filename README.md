@@ -40,7 +40,8 @@ Java worker 不对外提供 HTTP 接口。
 - `fq.upstream`: 番茄上游地址与超时
 - `fq.signer.command`: Rust 拉起 Java worker 的命令
 - `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
-- `fq.device_profile`: 当前默认设备信息
+- `fq.device_profile`: 当前生效设备信息
+- `fq.device_pool`: 可选设备池；如果配置了，会按 `fq.device_pool_startup_name` 或首项继承到运行设备
 
 默认 worker 命令是：
 
@@ -60,7 +61,7 @@ fq:
 
 本地有 Rust / Java / Maven 时，最短路径如下：
 
-1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备信息、上游配置，以及 `fq.signer.command` 里的 jar 路径。
+1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备池/设备信息、上游配置，以及 `fq.signer.command` 里的 jar 路径。
 2. 构建 Java worker：`mvn -f signer/pom.xml -DskipTests package`
 3. 构建 Rust API：`cargo build --release`
 4. 以源码资源目录启动：`UNIDBG_RESOURCE_ROOT="$PWD/signer/src/main/resources" ./target/release/fq-api`

@@ -25,6 +25,8 @@ pub struct FqConfig {
     pub signer: SignerConfig,
     pub cache: CacheConfig,
     pub search: SearchConfig,
+    pub device_pool_startup_name: Option<String>,
+    pub device_pool: Vec<DeviceProfile>,
     pub device_profile: DeviceProfile,
 }
 
@@ -61,7 +63,7 @@ pub struct SearchConfig {
     pub phase1_delay_max_ms: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct DeviceProfile {
     pub name: String,
@@ -70,7 +72,7 @@ pub struct DeviceProfile {
     pub device: UpstreamDevice,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct UpstreamDevice {
     pub aid: String,
@@ -115,6 +117,8 @@ impl Default for FqConfig {
             signer: SignerConfig::default(),
             cache: CacheConfig::default(),
             search: SearchConfig::default(),
+            device_pool_startup_name: None,
+            device_pool: Vec::new(),
             device_profile: DeviceProfile::default(),
         }
     }
@@ -203,6 +207,7 @@ impl AppConfig {
     pub fn load() -> Result<Self> {
         let mut config = load_from_disk()?;
         config.apply_env();
+        config.inherit_device_pool_defaults();
         config.validate()?;
         Ok(config)
     }
@@ -245,10 +250,24 @@ impl AppConfig {
         if self.fq.signer.command.is_empty() {
             return Err(anyhow!("fq.signer.command 不能为空"));
         }
-        if self.fq.device_profile.device.device_id.trim().is_empty() {
-            return Err(anyhow!("fq.device_profile.device.device_id 不能为空"));
+        validate_device_profile(&self.fq.device_profile, "fq.device_profile")?;
+        for (index, profile) in self.fq.device_pool.iter().enumerate() {
+            validate_device_profile(profile, &format!("fq.device_pool[{index}]"))?;
         }
         Ok(())
+    }
+
+    fn inherit_device_pool_defaults(&mut self) {
+        let Some(bootstrap) = self.fq.resolve_bootstrap_profile().cloned() else {
+            return;
+        };
+
+        if self.fq.device_profile == DeviceProfile::default() {
+            self.fq.device_profile = bootstrap;
+            return;
+        }
+
+        self.fq.device_profile.inherit_missing_from(&bootstrap);
     }
 }
 
@@ -261,6 +280,79 @@ impl UpstreamConfig {
         }
         self.base_url
             .replace("api5-normal-sinfonlineb", "api5-normal-sinfonlinec")
+    }
+}
+
+impl FqConfig {
+    fn resolve_bootstrap_profile(&self) -> Option<&DeviceProfile> {
+        if self.device_pool.is_empty() {
+            return None;
+        }
+
+        if let Some(startup_name) = self
+            .device_pool_startup_name
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            if let Some(profile) = self
+                .device_pool
+                .iter()
+                .find(|profile| profile.name.trim() == startup_name)
+            {
+                return Some(profile);
+            }
+        }
+
+        self.device_pool.first()
+    }
+}
+
+impl DeviceProfile {
+    fn inherit_missing_from(&mut self, fallback: &DeviceProfile) {
+        inherit_string(&mut self.name, &fallback.name);
+        inherit_string(&mut self.user_agent, &fallback.user_agent);
+        inherit_string(&mut self.cookie, &fallback.cookie);
+        self.device.inherit_missing_from(&fallback.device);
+    }
+}
+
+impl UpstreamDevice {
+    fn inherit_missing_from(&mut self, fallback: &UpstreamDevice) {
+        inherit_string(&mut self.aid, &fallback.aid);
+        inherit_string(&mut self.cdid, &fallback.cdid);
+        inherit_string(&mut self.device_id, &fallback.device_id);
+        inherit_string(&mut self.device_type, &fallback.device_type);
+        inherit_string(&mut self.device_brand, &fallback.device_brand);
+        inherit_string(&mut self.install_id, &fallback.install_id);
+        inherit_string(&mut self.resolution, &fallback.resolution);
+        inherit_string(&mut self.dpi, &fallback.dpi);
+        inherit_string(&mut self.rom_version, &fallback.rom_version);
+        inherit_string(&mut self.host_abi, &fallback.host_abi);
+        inherit_string(&mut self.update_version_code, &fallback.update_version_code);
+        inherit_string(&mut self.version_code, &fallback.version_code);
+        inherit_string(&mut self.version_name, &fallback.version_name);
+        inherit_string(&mut self.os_version, &fallback.os_version);
+        inherit_string(&mut self.os_api, &fallback.os_api);
+    }
+}
+
+fn validate_device_profile(profile: &DeviceProfile, field_name: &str) -> Result<()> {
+    if profile.user_agent.trim().is_empty() {
+        return Err(anyhow!("{field_name}.user_agent 不能为空"));
+    }
+    if profile.cookie.trim().is_empty() {
+        return Err(anyhow!("{field_name}.cookie 不能为空"));
+    }
+    if profile.device.device_id.trim().is_empty() {
+        return Err(anyhow!("{field_name}.device.device_id 不能为空"));
+    }
+    Ok(())
+}
+
+fn inherit_string(target: &mut String, fallback: &str) {
+    if target.trim().is_empty() {
+        *target = fallback.to_string();
     }
 }
 
