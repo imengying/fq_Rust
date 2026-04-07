@@ -12,7 +12,7 @@
 
 - `api`: Rust API 服务
 - `signer`: Java signer worker 与 unidbg 资源
-- `configs/api.example.yaml`: 默认配置示例
+- `configs/config.yaml`: 默认配置示例
 - `.github/workflows/ci.yml`: 编译与测试
 - `.github/workflows/docker-publish.yml`: Docker Hub 发布
 
@@ -31,9 +31,7 @@ Java worker 不对外提供 HTTP 接口。
 
 配置加载顺序：
 
-1. `configs/api.yaml`
-2. `configs/api.yml`
-3. `configs/api.example.yaml`
+1. `configs/config.yaml`
 
 关键项：
 
@@ -61,7 +59,7 @@ fq:
 
 本地有 Rust / Java / Maven 时，最短路径如下：
 
-1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备池/设备信息、上游配置，以及 `fq.signer.command` 里的 jar 路径。
+1. 直接修改 `configs/config.yaml`，按需调整设备池/设备信息、上游配置，以及 `fq.signer.command` 里的 jar 路径。
 2. 构建 Java worker：`mvn -f signer/pom.xml -DskipTests package`
 3. 构建 Rust API：`cargo build --release`
 4. 以源码资源目录启动：`UNIDBG_RESOURCE_ROOT="$PWD/signer/src/main/resources" ./target/release/fq-api`

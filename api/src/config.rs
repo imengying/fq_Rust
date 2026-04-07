@@ -357,11 +357,7 @@ fn inherit_string(target: &mut String, fallback: &str) {
 }
 
 fn load_from_disk() -> Result<AppConfig> {
-    const PATHS: [&str; 3] = [
-        "configs/api.yaml",
-        "configs/api.yml",
-        "configs/api.example.yaml",
-    ];
+    const PATHS: [&str; 1] = ["configs/config.yaml"];
 
     for path in PATHS {
         if Path::new(path).exists() {

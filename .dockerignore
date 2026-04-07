@@ -6,7 +6,7 @@
 !api/src/
 !api/src/**
 !configs/
-!configs/api.example.yaml
+!configs/config.yaml
 !signer/
 !signer/pom.xml
 !signer/src/
