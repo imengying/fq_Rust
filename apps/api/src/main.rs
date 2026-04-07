@@ -2,6 +2,7 @@ mod cache;
 mod config;
 mod content;
 mod models;
+mod registerkey;
 mod sidecar;
 mod state;
 mod upstream;

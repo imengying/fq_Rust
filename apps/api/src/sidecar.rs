@@ -1,4 +1,3 @@
-use crate::config::DeviceProfile;
 use crate::models::{ServiceError, ServiceResult};
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -20,15 +19,6 @@ pub struct SignResult {
     pub signer_epoch: i64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegisterKeyResolveResult {
-    pub device_fingerprint: String,
-    pub keyver: i64,
-    pub real_key_hex: String,
-    pub expires_at_ms: i64,
-    pub source: String,
-}
-
 impl SidecarClient {
     pub fn new(command: Vec<String>) -> ServiceResult<Self> {
         let mut process = SidecarProcess::new(command);
@@ -42,26 +32,6 @@ impl SidecarClient {
         let params = serde_json::to_value(SignRequest { url, headers })
             .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
         self.request("sign", params).await
-    }
-
-    pub async fn resolve_register_key(
-        &self,
-        device_profile: &DeviceProfile,
-        required_keyver: Option<i64>,
-    ) -> ServiceResult<RegisterKeyResolveResult> {
-        let params = serde_json::to_value(RegisterKeyResolveRequest {
-            device_profile,
-            required_keyver,
-        })
-        .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
-        self.request("register-key-resolve", params).await
-    }
-
-    pub async fn invalidate_register_key(&self, device_fingerprint: &str) -> ServiceResult<()> {
-        let params = serde_json::to_value(RegisterKeyInvalidateRequest { device_fingerprint })
-            .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
-        let _: RegisterKeyInvalidateResult = self.request("register-key-invalidate", params).await?;
-        Ok(())
     }
 
     async fn request<T>(&self, method: &str, params: Value) -> ServiceResult<T>
@@ -218,18 +188,6 @@ struct SignRequest<'a> {
 }
 
 #[derive(Serialize)]
-struct RegisterKeyResolveRequest<'a> {
-    device_profile: &'a DeviceProfile,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    required_keyver: Option<i64>,
-}
-
-#[derive(Serialize)]
-struct RegisterKeyInvalidateRequest<'a> {
-    device_fingerprint: &'a str,
-}
-
-#[derive(Serialize)]
 struct WorkerRequest {
     id: String,
     method: String,
@@ -241,11 +199,6 @@ struct WorkerResponse<T> {
     code: i32,
     message: String,
     data: Option<T>,
-}
-
-#[derive(Deserialize)]
-struct RegisterKeyInvalidateResult {
-    invalidated: bool,
 }
 
 fn truncate(value: &str, max_len: usize) -> String {

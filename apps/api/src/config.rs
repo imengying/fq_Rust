@@ -49,6 +49,8 @@ pub struct CacheConfig {
     pub search_ttl_ms: u64,
     pub directory_ttl_ms: u64,
     pub chapter_ttl_ms: u64,
+    pub register_key_ttl_ms: u64,
+    pub register_key_max_entries: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -147,6 +149,8 @@ impl Default for CacheConfig {
             search_ttl_ms: 45_000,
             directory_ttl_ms: 600_000,
             chapter_ttl_ms: 600_000,
+            register_key_ttl_ms: 3_600_000,
+            register_key_max_entries: 128,
         }
     }
 }
@@ -218,6 +222,14 @@ impl AppConfig {
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
         set_command(&mut self.fq.sidecar.command, "FQRS_SIDECAR_COMMAND");
+        set_u64(
+            &mut self.fq.cache.register_key_ttl_ms,
+            "FQRS_REGISTER_KEY_CACHE_TTL_MS",
+        );
+        set_u64(
+            &mut self.fq.cache.register_key_max_entries,
+            "FQRS_REGISTER_KEY_CACHE_MAX_ENTRIES",
+        );
     }
 
     fn validate(&self) -> Result<()> {

@@ -3,7 +3,8 @@
 番茄小说混合架构实现，当前形态是单项目、单镜像、双语言运行时：
 
 - Rust 负责对外 HTTP API、上游请求编排、缓存和内容解密
-- Java 只保留 `unidbg signer` 与 `registerkey`，作为 Rust 拉起的内部 worker
+- Rust 负责 `registerkey` 请求、缓存和解密 key 解析
+- Java 只保留 `unidbg signer`，作为 Rust 拉起的内部 worker
 - 容器主进程只有 `fq-api`，Java worker 通过子进程 `stdin/stdout` 和 Rust 通信
 
 ## 代码结构

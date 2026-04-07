@@ -2,7 +2,6 @@ package com.mengying.fqnovel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mengying.fqnovel.config.SidecarUpstreamProperties;
 import com.mengying.fqnovel.config.UnidbgProperties;
 import com.mengying.fqnovel.dto.*;
 import com.mengying.fqnovel.service.*;
@@ -28,12 +27,8 @@ public final class SidecarWorker {
 
     public static void main(String[] args) throws Exception {
         UnidbgProperties unidbgProperties = UnidbgProperties.fromEnv();
-        SidecarUpstreamProperties upstreamProperties = SidecarUpstreamProperties.fromEnv();
         FQEncryptServiceWorker encryptWorker = new FQEncryptServiceWorker(unidbgProperties);
         SignerService signerService = new SignerService(encryptWorker);
-        RegisterKeyUpstreamClient upstreamClient =
-            new RegisterKeyUpstreamClient(upstreamProperties, signerService, MAPPER);
-        RegisterKeyService registerKeyService = new RegisterKeyService(upstreamClient, upstreamProperties);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             ProcessLifecycle.markShuttingDown("worker-shutdown");
@@ -49,7 +44,7 @@ public final class SidecarWorker {
                 if (line.isBlank()) {
                     continue;
                 }
-                WorkerResponse<?> response = handle(line, signerService, registerKeyService);
+                WorkerResponse<?> response = handle(line, signerService);
                 writer.write(MAPPER.writeValueAsString(response));
                 writer.newLine();
                 writer.flush();
@@ -61,8 +56,7 @@ public final class SidecarWorker {
 
     private static WorkerResponse<?> handle(
         String line,
-        SignerService signerService,
-        RegisterKeyService registerKeyService
+        SignerService signerService
     ) {
         WorkerRequest request;
         try {
@@ -82,13 +76,9 @@ public final class SidecarWorker {
             }
             return switch (method) {
                 case "sign" -> WorkerResponse.success(requestId, handleSign(request.params(), signerService));
-                case "register-key-resolve" -> WorkerResponse.success(requestId, handleRegisterKeyResolve(request.params(), registerKeyService));
-                case "register-key-invalidate" -> WorkerResponse.success(requestId, handleRegisterKeyInvalidate(request.params(), registerKeyService));
                 case "signer-reset" -> WorkerResponse.success(requestId, handleSignerReset(request.params(), signerService));
                 default -> WorkerResponse.error(requestId, 1001, "invalid request");
             };
-        } catch (RegisterKeyVersionMismatchException e) {
-            return WorkerResponse.error(requestId, 1101, e.getMessage());
         } catch (SignerUnavailableException e) {
             return WorkerResponse.error(requestId, 1003, e.getMessage());
         } catch (IllegalArgumentException e) {
@@ -104,27 +94,9 @@ public final class SidecarWorker {
         return signerService.sign(request.url(), request.headers());
     }
 
-    private static RegisterKeyResolveResult handleRegisterKeyResolve(
-        JsonNode params,
-        RegisterKeyService registerKeyService
-    ) throws Exception {
-        RegisterKeyResolveRequest request = MAPPER.convertValue(params, RegisterKeyResolveRequest.class);
-        return registerKeyService.resolve(request.deviceProfile(), request.requiredKeyver());
-    }
-
-    private static RegisterKeyInvalidateResult handleRegisterKeyInvalidate(
-        JsonNode params,
-        RegisterKeyService registerKeyService
-    ) {
-        RegisterKeyInvalidateRequest request = MAPPER.convertValue(params, RegisterKeyInvalidateRequest.class);
-        boolean invalidated = registerKeyService.invalidate(request.deviceFingerprint());
-        return new RegisterKeyInvalidateResult(request.deviceFingerprint(), invalidated);
-    }
-
     private static SignerResetResult handleSignerReset(JsonNode params, SignerService signerService) {
         SignerResetRequest request = MAPPER.convertValue(params, SignerResetRequest.class);
         SignerResetDecision decision = signerService.reset(request.reason());
         return new SignerResetResult(true, decision.signerEpoch(), decision.cooldownApplied());
     }
 }
-

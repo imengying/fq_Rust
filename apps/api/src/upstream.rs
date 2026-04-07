@@ -4,7 +4,7 @@ use crate::models::{
     BookInfo, BookItem, ChapterInfo, DirectoryItemData, DirectoryResponse, SearchResponse,
     ServiceError, ServiceResult, UpstreamBookInfo,
 };
-use crate::sidecar::RegisterKeyResolveResult;
+use crate::registerkey::RegisterKeyResolveResult;
 use crate::state::AppState;
 use indexmap::IndexMap;
 use rand::Rng;
@@ -244,8 +244,14 @@ async fn resolve_register_key(
     required_keyver: Option<i64>,
 ) -> ServiceResult<RegisterKeyResolveResult> {
     state
-        .sidecar_client
-        .resolve_register_key(&state.config.fq.device_profile, required_keyver)
+        .register_key_service
+        .resolve(
+            &state.http_client,
+            &state.sidecar_client,
+            &state.config.fq.upstream,
+            &state.config.fq.device_profile,
+            required_keyver,
+        )
         .await
 }
 
@@ -259,9 +265,8 @@ async fn decrypt_chapter_with_retry(
         Ok(value) => Ok(value),
         Err(_) => {
             state
-                .sidecar_client
-                .invalidate_register_key(&first_resolve.device_fingerprint)
-                .await?;
+                .register_key_service
+                .invalidate(&first_resolve.device_fingerprint)?;
             let refreshed = resolve_register_key(state, required_keyver).await?;
             decrypt_and_decompress_content(encrypted, &refreshed.real_key_hex)
                 .map_err(|error| ServiceError::internal(format!("章节解密失败: {error}")))

@@ -1,6 +1,7 @@
 use crate::cache::TtlCache;
 use crate::config::AppConfig;
 use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
+use crate::registerkey::RegisterKeyService;
 use crate::sidecar::SidecarClient;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub directory_cache: TtlCache<DirectoryResponse>,
     pub book_cache: TtlCache<BookInfo>,
     pub chapter_cache: TtlCache<ChapterInfo>,
+    pub register_key_service: RegisterKeyService,
 }
 
 impl AppState {
@@ -39,6 +41,10 @@ impl AppState {
             directory_cache: TtlCache::new(directory_ttl),
             book_cache: TtlCache::new(directory_ttl),
             chapter_cache: TtlCache::new(chapter_ttl),
+            register_key_service: RegisterKeyService::new(
+                config.fq.cache.register_key_ttl_ms,
+                config.fq.cache.register_key_max_entries as usize,
+            ),
             config,
         }))
     }
