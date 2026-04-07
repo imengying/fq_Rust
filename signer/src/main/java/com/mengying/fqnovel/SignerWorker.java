@@ -19,6 +19,8 @@ public final class SignerWorker {
     }
 
     public static void main(String[] args) throws Exception {
+        ConsoleNoiseFilter.install();
+
         IdleFQ signer = new IdleFQ(
             Boolean.parseBoolean(System.getenv().getOrDefault("UNIDBG_VERBOSE", "false")),
             trimToNull(System.getenv("UNIDBG_APK_PATH")),

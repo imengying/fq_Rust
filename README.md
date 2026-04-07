@@ -67,6 +67,8 @@ fq:
 
 如果本地没有环境，也可以直接依赖 GitHub Actions 产物或 Docker。
 
+如需关闭 `unidbg/libmetasec` 控制台噪音过滤，可在 `fq.signer.command` 里给 JVM 加 `-Dfq.log.filterConsoleNoise=false`。
+
 启动后可以直接请求：
 
 ```bash
