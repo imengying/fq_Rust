@@ -23,7 +23,6 @@ async fn main() -> anyhow::Result<()> {
     let config = config::AppConfig::load()?;
     let state = AppState::new(config.clone())?;
     let app = Router::new()
-        .route("/healthz", get(healthz))
         .route("/search", get(search))
         .route("/book/{book_id}", get(book))
         .route("/toc/{book_id}", get(toc))
@@ -39,12 +38,6 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-async fn healthz() -> Json<ApiResponse<serde_json::Value>> {
-    Json(ApiResponse::success(serde_json::json!({
-        "status": "ok"
-    })))
 }
 
 async fn search(
