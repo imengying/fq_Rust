@@ -43,7 +43,7 @@ Java worker 不对外提供 HTTP 接口。
 - `fq.device_profile`: 当前生效设备信息
 - `fq.device_pool`: 可选设备池；如果配置了，会按 `fq.device_pool_startup_name` 或首项继承到运行设备
 - `fq.device_rotate_cooldown_ms`: 运行时设备轮换冷却时间
-- `fq.device_pool_probe_on_startup`: 启动时按设备池做轻量探测
+- `fq.device_pool_probe_on_startup`: 启动时按设备池做轻量探测，默认关闭
 
 默认 worker 命令是：
 

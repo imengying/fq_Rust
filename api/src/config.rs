@@ -134,7 +134,7 @@ impl Default for FqConfig {
             search: SearchConfig::default(),
             auto_heal: AutoHealConfig::default(),
             device_rotate_cooldown_ms: 60_000,
-            device_pool_probe_on_startup: true,
+            device_pool_probe_on_startup: false,
             device_pool_probe_max_attempts: 3,
             device_pool_startup_name: None,
             device_pool: Vec::new(),

@@ -32,7 +32,7 @@ fq:
     window_ms: 300000
     cooldown_ms: 180000
   device_rotate_cooldown_ms: 60000
-  device_pool_probe_on_startup: true
+  device_pool_probe_on_startup: false
   device_pool_probe_max_attempts: 3
   device_pool_startup_name: dev01
   device_pool:

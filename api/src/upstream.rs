@@ -246,6 +246,16 @@ pub async fn run_startup_probe(state: &AppState) {
                 );
             }
             Err(error) => {
+                if is_empty_upstream_probe_error(&error) {
+                    warn!(
+                        "startup probe skipped due to empty upstream response: name={}, device_id={}, install_id={}, reason={}",
+                        profile.name,
+                        profile.device.device_id,
+                        profile.device.install_id,
+                        error.message
+                    );
+                    return;
+                }
                 warn!(
                     "startup probe errored: name={}, device_id={}, install_id={}, code={}, reason={}",
                     profile.name,
@@ -1052,6 +1062,10 @@ fn truncate_for_log(value: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &value[..max_len])
     }
+}
+
+fn is_empty_upstream_probe_error(error: &ServiceError) -> bool {
+    error.code == -1 && error.message.contains("上游返回空响应")
 }
 
 async fn probe_current_device(state: &AppState) -> ServiceResult<ProbeOutcome> {
