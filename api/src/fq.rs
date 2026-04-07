@@ -2,7 +2,7 @@ use crate::config::DeviceProfile;
 use crate::models::{ServiceError, ServiceResult};
 use chrono::Utc;
 use indexmap::IndexMap;
-use rand::Rng;
+use rand::RngExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 pub fn now_ms() -> i64 {

@@ -10,7 +10,7 @@ use crate::registerkey::device_fingerprint;
 use crate::registerkey::RegisterKeyResolveResult;
 use crate::state::AppState;
 use indexmap::IndexMap;
-use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
