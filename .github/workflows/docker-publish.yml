@@ -28,8 +28,10 @@ env:
 
 jobs:
   publish:
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -60,30 +62,35 @@ jobs:
           echo "push_latest=${push_latest}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/setup-qemu-action@v3.7.0
         with:
           platforms: arm64
 
       - name: Set up Docker Buildx
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/setup-buildx-action@v3.12.0
 
       - name: Login to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3.6.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Docker metadata
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         id: meta
         uses: docker/metadata-action@v5.10.0
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/fq-rust
+          images: ${{ env.DOCKERHUB_USERNAME }}/fq-rust
           tags: |
             type=raw,value=latest,enable=${{ steps.vars.outputs.push_latest == 'true' }}
             type=ref,event=tag
             type=raw,value=${{ steps.vars.outputs.version_tag }},enable=${{ github.event_name == 'workflow_dispatch' && steps.vars.outputs.version_tag != '' }}
 
       - name: Build and push
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/build-push-action@v6.18.0
         with:
           context: .
@@ -95,11 +102,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  publish-skipped:
-    if: ${{ secrets.DOCKERHUB_USERNAME == '' || secrets.DOCKERHUB_TOKEN == '' }}
-    runs-on: ubuntu-latest
-    steps:
       - name: Docker push skipped
+        if: ${{ env.DOCKERHUB_USERNAME == '' || env.DOCKERHUB_TOKEN == '' }}
         run: |
           echo "Docker Hub secrets not set; skip pushing images."
           echo "Required secrets:"
