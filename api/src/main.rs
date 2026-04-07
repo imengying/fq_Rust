@@ -31,9 +31,9 @@ async fn main() -> anyhow::Result<()> {
     upstream::run_startup_probe(&state).await;
     let app = Router::new()
         .route("/search", get(search))
-        .route("/book/{book_id}", get(book))
-        .route("/toc/{book_id}", get(toc))
-        .route("/chapter/{book_id}/{chapter_id}", get(chapter))
+        .route("/book/:book_id", get(book))
+        .route("/toc/:book_id", get(toc))
+        .route("/chapter/:book_id/:chapter_id", get(chapter))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
