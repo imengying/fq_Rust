@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mengying.fqnovel.config.UnidbgProperties;
 import com.mengying.fqnovel.dto.*;
-import com.mengying.fqnovel.service.*;
+import com.mengying.fqnovel.service.FQEncryptService;
 import com.mengying.fqnovel.utils.ProcessLifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +14,7 @@ import java.io.BufferedWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 
 public final class SidecarWorker {
@@ -27,12 +27,11 @@ public final class SidecarWorker {
 
     public static void main(String[] args) throws Exception {
         UnidbgProperties unidbgProperties = UnidbgProperties.fromEnv();
-        FQEncryptServiceWorker encryptWorker = new FQEncryptServiceWorker(unidbgProperties);
-        SignerService signerService = new SignerService(encryptWorker);
+        FQEncryptService signer = new FQEncryptService(unidbgProperties);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             ProcessLifecycle.markShuttingDown("worker-shutdown");
-            encryptWorker.destroy();
+            signer.destroy();
         }));
 
         try (
@@ -44,19 +43,19 @@ public final class SidecarWorker {
                 if (line.isBlank()) {
                     continue;
                 }
-                WorkerResponse<?> response = handle(line, signerService);
+                WorkerResponse<?> response = handle(line, signer);
                 writer.write(MAPPER.writeValueAsString(response));
                 writer.newLine();
                 writer.flush();
             }
         } finally {
-            encryptWorker.destroy();
+            signer.destroy();
         }
     }
 
     private static WorkerResponse<?> handle(
         String line,
-        SignerService signerService
+        FQEncryptService signer
     ) {
         WorkerRequest request;
         try {
@@ -75,12 +74,9 @@ public final class SidecarWorker {
                 throw new IllegalArgumentException("method 不能为空");
             }
             return switch (method) {
-                case "sign" -> WorkerResponse.success(requestId, handleSign(request.params(), signerService));
-                case "signer-reset" -> WorkerResponse.success(requestId, handleSignerReset(request.params(), signerService));
+                case "sign" -> handleSign(requestId, request.params(), signer);
                 default -> WorkerResponse.error(requestId, 1001, "invalid request");
             };
-        } catch (SignerUnavailableException e) {
-            return WorkerResponse.error(requestId, 1003, e.getMessage());
         } catch (IllegalArgumentException e) {
             return WorkerResponse.error(requestId, 1001, e.getMessage());
         } catch (Exception e) {
@@ -89,14 +85,18 @@ public final class SidecarWorker {
         }
     }
 
-    private static SignResult handleSign(JsonNode params, SignerService signerService) {
+    private static WorkerResponse<?> handleSign(String requestId, JsonNode params, FQEncryptService signer) {
         SignRequest request = MAPPER.convertValue(params, SignRequest.class);
-        return signerService.sign(request.url(), request.headers());
-    }
-
-    private static SignerResetResult handleSignerReset(JsonNode params, SignerService signerService) {
-        SignerResetRequest request = MAPPER.convertValue(params, SignerResetRequest.class);
-        SignerResetDecision decision = signerService.reset(request.reason());
-        return new SignerResetResult(true, decision.signerEpoch(), decision.cooldownApplied());
+        if (request.url() == null || request.url().isBlank()) {
+            throw new IllegalArgumentException("url 不能为空");
+        }
+        if (request.headers() == null) {
+            throw new IllegalArgumentException("headers 不能为空");
+        }
+        var signed = signer.generateSignatureHeaders(request.url(), request.headers());
+        if (signed == null || signed.isEmpty()) {
+            return WorkerResponse.error(requestId, 1003, "signer unavailable");
+        }
+        return WorkerResponse.success(requestId, new SignResult(new LinkedHashMap<>(signed)));
     }
 }

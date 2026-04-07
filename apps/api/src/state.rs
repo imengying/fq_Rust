@@ -34,7 +34,7 @@ impl AppState {
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
-            sidecar_client: SidecarClient::new(config.fq.sidecar.command.clone())
+            sidecar_client: SidecarClient::new(config.fq.sidecar.clone())
                 .map_err(|error| anyhow!(error.message))?,
             http_client,
             search_cache: TtlCache::new(search_ttl),

@@ -38,6 +38,7 @@ Java worker 不对外提供 HTTP 接口。
 
 - `fq.upstream`: 番茄上游地址与超时
 - `fq.sidecar.command`: Rust 拉起 Java worker 的命令
+- `fq.sidecar.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
 - `fq.device_profile`: 当前默认设备信息
 
 默认 worker 命令是：

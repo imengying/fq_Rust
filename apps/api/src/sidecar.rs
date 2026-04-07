@@ -1,3 +1,4 @@
+use crate::config::SidecarConfig;
 use crate::models::{ServiceError, ServiceResult};
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -5,7 +6,9 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task;
+use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -16,12 +19,11 @@ pub struct SidecarClient {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SignResult {
     pub headers: IndexMap<String, String>,
-    pub signer_epoch: i64,
 }
 
 impl SidecarClient {
-    pub fn new(command: Vec<String>) -> ServiceResult<Self> {
-        let mut process = SidecarProcess::new(command);
+    pub fn new(config: SidecarConfig) -> ServiceResult<Self> {
+        let mut process = SidecarProcess::new(config.command, config.restart_cooldown_ms);
         process.ensure_started()?;
         Ok(Self {
             inner: Arc::new(Mutex::new(process)),
@@ -31,7 +33,27 @@ impl SidecarClient {
     pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
         let params = serde_json::to_value(SignRequest { url, headers })
             .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
-        self.request("sign", params).await
+        let inner = self.inner.clone();
+        task::spawn_blocking(move || {
+            let mut process = inner
+                .lock()
+                .map_err(|_| ServiceError::internal("sidecar 进程锁异常"))?;
+
+            match process.call::<JavaSignResult>("sign", params.clone()) {
+                Ok(data) => Ok(SignResult { headers: data.headers }),
+                Err(error) => {
+                    if process.should_restart_after_sign_error(&error)
+                        && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
+                    {
+                        let data = process.call::<JavaSignResult>("sign", params)?;
+                        return Ok(SignResult { headers: data.headers });
+                    }
+                    Err(error)
+                }
+            }
+        })
+        .await
+        .map_err(|error| ServiceError::internal(format!("sidecar 请求执行失败: {error}")))?
     }
 
     async fn request<T>(&self, method: &str, params: Value) -> ServiceResult<T>
@@ -53,18 +75,22 @@ impl SidecarClient {
 
 struct SidecarProcess {
     command: Vec<String>,
+    restart_cooldown_ms: u64,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     stdout: Option<BufReader<ChildStdout>>,
+    last_restart_at_ms: i64,
 }
 
 impl SidecarProcess {
-    fn new(command: Vec<String>) -> Self {
+    fn new(command: Vec<String>, restart_cooldown_ms: u64) -> Self {
         Self {
             command,
+            restart_cooldown_ms,
             child: None,
             stdin: None,
             stdout: None,
+            last_restart_at_ms: 0,
         }
     }
 
@@ -145,6 +171,10 @@ impl SidecarProcess {
             self.reset_process();
         }
 
+        self.spawn_process()
+    }
+
+    fn spawn_process(&mut self) -> ServiceResult<()> {
         let binary = self
             .command
             .first()
@@ -163,6 +193,25 @@ impl SidecarProcess {
         self.stdout = child.stdout.take().map(BufReader::new);
         self.child = Some(child);
         Ok(())
+    }
+    fn should_restart_after_sign_error(&self, error: &ServiceError) -> bool {
+        error.code == 1003 || error.code == -1
+    }
+
+    fn restart_if_allowed(&mut self, reason: &str) -> ServiceResult<bool> {
+        let now = now_ms();
+        if self.restart_cooldown_ms > 0
+            && self.last_restart_at_ms > 0
+            && now - self.last_restart_at_ms < self.restart_cooldown_ms as i64
+        {
+            return Ok(false);
+        }
+
+        warn!("restarting sidecar process: reason={reason}");
+        self.reset_process();
+        self.spawn_process()?;
+        self.last_restart_at_ms = now;
+        Ok(true)
     }
 
     fn reset_process(&mut self) {
@@ -201,10 +250,22 @@ struct WorkerResponse<T> {
     data: Option<T>,
 }
 
+#[derive(Deserialize)]
+struct JavaSignResult {
+    headers: IndexMap<String, String>,
+}
+
 fn truncate(value: &str, max_len: usize) -> String {
     if value.len() <= max_len {
         value.to_string()
     } else {
         format!("{}...", &value[..max_len])
     }
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis() as i64)
+        .unwrap_or(0)
 }

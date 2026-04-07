@@ -41,6 +41,7 @@ pub struct UpstreamConfig {
 #[serde(default)]
 pub struct SidecarConfig {
     pub command: Vec<String>,
+    pub restart_cooldown_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -139,6 +140,7 @@ impl Default for SidecarConfig {
                 "-jar".to_string(),
                 "/app/fq-sidecar.jar".to_string(),
             ],
+            restart_cooldown_ms: 2_000,
         }
     }
 }
@@ -222,6 +224,10 @@ impl AppConfig {
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
         set_command(&mut self.fq.sidecar.command, "FQRS_SIDECAR_COMMAND");
+        set_u64(
+            &mut self.fq.sidecar.restart_cooldown_ms,
+            "FQRS_SIDECAR_RESTART_COOLDOWN_MS",
+        );
         set_u64(
             &mut self.fq.cache.register_key_ttl_ms,
             "FQRS_REGISTER_KEY_CACHE_TTL_MS",
