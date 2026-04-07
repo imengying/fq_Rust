@@ -225,14 +225,36 @@ pub async fn run_startup_probe(state: &AppState) {
                 .device_pool
                 .activate_profile_by_name(&profile.name, "STARTUP_PROBE_SWITCH");
         }
-        if probe_current_device(state).await {
-            info!(
-                "startup probe selected device: name={}, device_id={}, install_id={}",
-                profile.name,
-                profile.device.device_id,
-                profile.device.install_id
-            );
-            return;
+        match probe_current_device(state).await {
+            Ok(ProbeOutcome::Passed(reason)) => {
+                info!(
+                    "startup probe selected device: name={}, device_id={}, install_id={}, reason={}",
+                    profile.name,
+                    profile.device.device_id,
+                    profile.device.install_id,
+                    reason
+                );
+                return;
+            }
+            Ok(ProbeOutcome::Failed(reason)) => {
+                warn!(
+                    "startup probe failed: name={}, device_id={}, install_id={}, reason={}",
+                    profile.name,
+                    profile.device.device_id,
+                    profile.device.install_id,
+                    reason
+                );
+            }
+            Err(error) => {
+                warn!(
+                    "startup probe errored: name={}, device_id={}, install_id={}, code={}, reason={}",
+                    profile.name,
+                    profile.device.device_id,
+                    profile.device.install_id,
+                    error.code,
+                    error.message
+                );
+            }
         }
     }
 
@@ -1015,14 +1037,24 @@ fn truncate_for_log(value: &str, max_len: usize) -> String {
     }
 }
 
-async fn probe_current_device(state: &AppState) -> bool {
+async fn probe_current_device(state: &AppState) -> ServiceResult<ProbeOutcome> {
     let mut request = SearchUpstreamRequest::new("系统".to_string(), 0, 1, 1, None);
     request.is_first_enter_search = true;
     request.last_search_page_interval = 0;
 
     match execute_search_once(state, &request).await {
-        Ok(response) => response.search_id.is_some() || !response.books.is_empty(),
-        Err(_) => false,
+        Ok(response) => {
+            if response.search_id.is_some() {
+                Ok(ProbeOutcome::Passed("search_id".to_string()))
+            } else if !response.books.is_empty() {
+                Ok(ProbeOutcome::Passed("books".to_string()))
+            } else {
+                Ok(ProbeOutcome::Failed(
+                    "code=0 but response has neither search_id nor books".to_string(),
+                ))
+            }
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -1057,6 +1089,11 @@ struct ChapterContext {
     next_chapter_id: Option<String>,
     is_free: bool,
     title: Option<String>,
+}
+
+enum ProbeOutcome {
+    Passed(String),
+    Failed(String),
 }
 
 #[derive(Debug, Clone, Deserialize)]
