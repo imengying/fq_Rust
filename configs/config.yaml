@@ -21,10 +21,19 @@ fq:
     chapter_ttl_ms: 600000
     register_key_ttl_ms: 3600000
     register_key_max_entries: 128
+    postgres_url:
+    postgres_table: fq_chapter_cache
   search:
     phase1_delay_min_ms: 1000
     phase1_delay_max_ms: 2000
+  auto_heal:
+    enabled: true
+    error_threshold: 5
+    window_ms: 300000
+    cooldown_ms: 180000
   device_rotate_cooldown_ms: 60000
+  device_pool_probe_on_startup: true
+  device_pool_probe_max_attempts: 3
   device_pool_startup_name: dev01
   device_pool:
     - name: dev01

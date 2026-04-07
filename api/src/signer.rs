@@ -57,6 +57,19 @@ impl SignerClient {
         .await
         .map_err(|error| ServiceError::internal(format!("signer 请求执行失败: {error}")))?
     }
+
+    pub async fn restart(&self, reason: &str) -> ServiceResult<bool> {
+        let inner = self.inner.clone();
+        let reason = reason.to_string();
+        task::spawn_blocking(move || {
+            let mut process = inner
+                .lock()
+                .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
+            process.restart_if_allowed(&reason)
+        })
+        .await
+        .map_err(|error| ServiceError::internal(format!("signer 重启执行失败: {error}")))?
+    }
 }
 
 struct SignerProcess {

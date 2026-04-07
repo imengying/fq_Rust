@@ -38,9 +38,12 @@ Java worker 不对外提供 HTTP 接口。
 - `fq.upstream`: 番茄上游地址与超时
 - `fq.signer.command`: Rust 拉起 Java worker 的命令
 - `fq.signer.restart_cooldown_ms`: Rust 侧 signer 进程重启节流
+- `fq.cache.postgres_url`: 可选 PostgreSQL 章节主缓存
+- `fq.auto_heal`: 连续错误后的 registerkey 失效、设备轮换、signer 重启自愈
 - `fq.device_profile`: 当前生效设备信息
 - `fq.device_pool`: 可选设备池；如果配置了，会按 `fq.device_pool_startup_name` 或首项继承到运行设备
 - `fq.device_rotate_cooldown_ms`: 运行时设备轮换冷却时间
+- `fq.device_pool_probe_on_startup`: 启动时按设备池做轻量探测
 
 默认 worker 命令是：
 
@@ -68,6 +71,7 @@ fq:
 如果本地没有环境，也可以直接依赖 GitHub Actions 产物或 Docker。
 
 如需关闭 `unidbg/libmetasec` 控制台噪音过滤，可在 `fq.signer.command` 里给 JVM 加 `-Dfq.log.filterConsoleNoise=false`。
+如需启用 PostgreSQL 章节缓存，可以设置 `fq.cache.postgres_url`，或直接用环境变量 `DB_URL` / `FQRS_DB_URL`。
 
 启动后可以直接请求：
 

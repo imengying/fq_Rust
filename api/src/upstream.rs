@@ -5,6 +5,7 @@ use crate::models::{
     BookInfo, BookItem, ChapterInfo, DirectoryItemData, DirectoryResponse, SearchResponse,
     ServiceError, ServiceResult, UpstreamBookInfo,
 };
+use crate::registerkey::device_fingerprint;
 use crate::registerkey::RegisterKeyResolveResult;
 use crate::state::AppState;
 use indexmap::IndexMap;
@@ -13,6 +14,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 const SEARCH_PATH: &str = "/reading/bookapi/search/tab/v";
@@ -112,6 +114,18 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
     if let Some(cached) = state.chapter_cache.get(&cache_key) {
         return Ok(cached);
     }
+    if let Some(pg_cache) = &state.pg_chapter_cache {
+        match pg_cache.get(&cache_key, now_ms()).await {
+            Ok(Some(cached)) => {
+                state.chapter_cache.insert(cache_key.clone(), cached.clone());
+                return Ok(cached);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                warn!("chapter cache read failed: {error}");
+            }
+        }
+    }
 
     let directory = fetch_directory(state, book_id, true).await.ok();
     let batch_response = fetch_batch_full(state, book_id, &[chapter_id.to_string()]).await?;
@@ -169,7 +183,62 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
     };
 
     state.chapter_cache.insert(cache_key, chapter.clone());
+    if let Some(pg_cache) = &state.pg_chapter_cache {
+        if let Err(error) = pg_cache.put(
+            &format!("chapter:{book_id}:{chapter_id}"),
+            &chapter,
+            now_ms(),
+        )
+        .await
+        {
+            warn!("chapter cache write failed: {error}");
+        }
+    }
     Ok(chapter)
+}
+
+pub async fn run_startup_probe(state: &AppState) {
+    if !state.config.fq.device_pool_probe_on_startup {
+        return;
+    }
+
+    let profiles = state.device_pool.profiles_snapshot();
+    if profiles.len() <= 1 {
+        return;
+    }
+
+    let attempts = state
+        .config
+        .fq
+        .device_pool_probe_max_attempts
+        .max(1)
+        .min(profiles.len());
+    let start_index = state.device_pool.current_index().unwrap_or(0);
+    let original_name = state.current_device_profile().name;
+
+    for step in 0..attempts {
+        let index = (start_index + step) % profiles.len();
+        let profile = &profiles[index];
+        if step > 0 {
+            let _ = state
+                .device_pool
+                .activate_profile_by_name(&profile.name, "STARTUP_PROBE_SWITCH");
+        }
+        if probe_current_device(state).await {
+            info!(
+                "startup probe selected device: name={}, device_id={}, install_id={}",
+                profile.name,
+                profile.device.device_id,
+                profile.device.install_id
+            );
+            return;
+        }
+    }
+
+    let _ = state
+        .device_pool
+        .activate_profile_by_name(&original_name, "STARTUP_PROBE_RESTORE");
+    warn!("startup probe failed for all attempted devices; restored {}", original_name);
 }
 
 async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> ServiceResult<DirectoryResponse> {
@@ -182,8 +251,15 @@ async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> Serv
         Ok(value) => value,
         Err(error) => {
             if should_rotate_after_error(&error) && state.rotate_device_if_allowed("DIRECTORY_FAIL") {
-                fetch_directory_once(state, book_id, minimal).await?
+                match fetch_directory_once(state, book_id, minimal).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        auto_heal_after_error(state, &error.message).await;
+                        return Err(error);
+                    }
+                }
             } else {
+                auto_heal_after_error(state, &error.message).await;
                 return Err(error);
             }
         }
@@ -257,8 +333,15 @@ async fn execute_search_once_with_rotation(
         Ok(value) => Ok(value),
         Err(error) => {
             if should_rotate_after_error(&error) && state.rotate_device_if_allowed(reason) {
-                execute_search_once(state, request).await
+                match execute_search_once(state, request).await {
+                    Ok(value) => Ok(value),
+                    Err(error) => {
+                        auto_heal_after_error(state, &error.message).await;
+                        Err(error)
+                    }
+                }
             } else {
+                auto_heal_after_error(state, &error.message).await;
                 Err(error)
             }
         }
@@ -274,8 +357,15 @@ async fn fetch_batch_full(
         Ok(value) => Ok(value),
         Err(error) => {
             if should_rotate_after_error(&error) && state.rotate_device_if_allowed("BATCH_FULL_FAIL") {
-                fetch_batch_full_once(state, book_id, item_ids).await
+                match fetch_batch_full_once(state, book_id, item_ids).await {
+                    Ok(value) => Ok(value),
+                    Err(error) => {
+                        auto_heal_after_error(state, &error.message).await;
+                        Err(error)
+                    }
+                }
             } else {
+                auto_heal_after_error(state, &error.message).await;
                 Err(error)
             }
         }
@@ -364,8 +454,10 @@ async fn execute_signed_json_get(
         )));
     }
 
-    serde_json::from_str(&body)
-        .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))
+    let parsed = serde_json::from_str(&body)
+        .map_err(|error| ServiceError::internal(format!("上游 JSON 解析失败: {error}")))?;
+    state.record_success();
+    Ok(parsed)
 }
 
 fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
@@ -886,6 +978,41 @@ fn should_rotate_after_error(error: &ServiceError) -> bool {
     }
     let uppercase = message.to_ascii_uppercase();
     uppercase.contains("ILLEGAL_ACCESS")
+}
+
+async fn probe_current_device(state: &AppState) -> bool {
+    let mut request = SearchUpstreamRequest::new("系统".to_string(), 0, 1, 1, None);
+    request.is_first_enter_search = true;
+    request.last_search_page_interval = 0;
+
+    match execute_search_once(state, &request).await {
+        Ok(response) => response.search_id.is_some() || !response.books.is_empty(),
+        Err(_) => false,
+    }
+}
+
+async fn auto_heal_after_error(state: &AppState, reason: &str) {
+    if !state.record_failure_and_should_heal() {
+        return;
+    }
+
+    let current_profile = state.current_device_profile();
+    let fingerprint = device_fingerprint(&current_profile);
+    let _ = state.register_key_service.invalidate(&fingerprint);
+    let rotated = state.rotate_device_if_allowed("AUTO_HEAL");
+    let restarted = state
+        .signer_client
+        .restart("AUTO_HEAL")
+        .await
+        .unwrap_or(false);
+
+    warn!(
+        "auto heal executed: reason={}, rotated={}, restarted_signer={}, device={}",
+        reason,
+        rotated,
+        restarted,
+        current_profile.name
+    );
 }
 
 #[derive(Debug, Clone)]

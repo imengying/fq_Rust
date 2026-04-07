@@ -69,7 +69,7 @@ impl RegisterKeyService {
         profile: &DeviceProfile,
         required_keyver: Option<i64>,
     ) -> ServiceResult<RegisterKeyResolveResult> {
-        let fingerprint = fingerprint(profile);
+        let fingerprint = device_fingerprint(profile);
         let normalized_keyver = required_keyver.filter(|value| *value > 0);
 
         if let Some(keyver) = normalized_keyver {
@@ -331,7 +331,7 @@ fn extract_real_key(registerkey_response_key: &str) -> ServiceResult<String> {
     Ok(full_key[..32].to_string())
 }
 
-fn fingerprint(profile: &DeviceProfile) -> String {
+pub fn device_fingerprint(profile: &DeviceProfile) -> String {
     let raw = [
         profile.name.as_str(),
         profile.user_agent.as_str(),

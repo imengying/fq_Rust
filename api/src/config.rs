@@ -25,7 +25,10 @@ pub struct FqConfig {
     pub signer: SignerConfig,
     pub cache: CacheConfig,
     pub search: SearchConfig,
+    pub auto_heal: AutoHealConfig,
     pub device_rotate_cooldown_ms: u64,
+    pub device_pool_probe_on_startup: bool,
+    pub device_pool_probe_max_attempts: usize,
     pub device_pool_startup_name: Option<String>,
     pub device_pool: Vec<DeviceProfile>,
     pub device_profile: DeviceProfile,
@@ -55,6 +58,8 @@ pub struct CacheConfig {
     pub chapter_ttl_ms: u64,
     pub register_key_ttl_ms: u64,
     pub register_key_max_entries: u64,
+    pub postgres_url: Option<String>,
+    pub postgres_table: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -62,6 +67,15 @@ pub struct CacheConfig {
 pub struct SearchConfig {
     pub phase1_delay_min_ms: u64,
     pub phase1_delay_max_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AutoHealConfig {
+    pub enabled: bool,
+    pub error_threshold: usize,
+    pub window_ms: u64,
+    pub cooldown_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -118,7 +132,10 @@ impl Default for FqConfig {
             signer: SignerConfig::default(),
             cache: CacheConfig::default(),
             search: SearchConfig::default(),
+            auto_heal: AutoHealConfig::default(),
             device_rotate_cooldown_ms: 60_000,
+            device_pool_probe_on_startup: true,
+            device_pool_probe_max_attempts: 3,
             device_pool_startup_name: None,
             device_pool: Vec::new(),
             device_profile: DeviceProfile::default(),
@@ -159,6 +176,8 @@ impl Default for CacheConfig {
             chapter_ttl_ms: 600_000,
             register_key_ttl_ms: 3_600_000,
             register_key_max_entries: 128,
+            postgres_url: None,
+            postgres_table: "fq_chapter_cache".to_string(),
         }
     }
 }
@@ -168,6 +187,17 @@ impl Default for SearchConfig {
         Self {
             phase1_delay_min_ms: 1_000,
             phase1_delay_max_ms: 2_000,
+        }
+    }
+}
+
+impl Default for AutoHealConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            error_threshold: 5,
+            window_ms: 300_000,
+            cooldown_ms: 180_000,
         }
     }
 }
@@ -243,9 +273,32 @@ impl AppConfig {
             &mut self.fq.cache.register_key_max_entries,
             "FQRS_REGISTER_KEY_CACHE_MAX_ENTRIES",
         );
+        set_optional_string(&mut self.fq.cache.postgres_url, "FQRS_DB_URL");
+        if self.fq.cache.postgres_url.is_none() {
+            set_optional_string(&mut self.fq.cache.postgres_url, "DB_URL");
+        }
+        set_string(&mut self.fq.cache.postgres_table, "FQRS_DB_TABLE");
         set_u64(
             &mut self.fq.device_rotate_cooldown_ms,
             "FQRS_DEVICE_ROTATE_COOLDOWN_MS",
+        );
+        set_bool(
+            &mut self.fq.device_pool_probe_on_startup,
+            "FQRS_DEVICE_POOL_PROBE_ON_STARTUP",
+        );
+        set_usize(
+            &mut self.fq.device_pool_probe_max_attempts,
+            "FQRS_DEVICE_POOL_PROBE_MAX_ATTEMPTS",
+        );
+        set_bool(&mut self.fq.auto_heal.enabled, "FQRS_AUTO_HEAL_ENABLED");
+        set_usize(
+            &mut self.fq.auto_heal.error_threshold,
+            "FQRS_AUTO_HEAL_ERROR_THRESHOLD",
+        );
+        set_u64(&mut self.fq.auto_heal.window_ms, "FQRS_AUTO_HEAL_WINDOW_MS");
+        set_u64(
+            &mut self.fq.auto_heal.cooldown_ms,
+            "FQRS_AUTO_HEAL_COOLDOWN_MS",
         );
     }
 
@@ -255,6 +308,9 @@ impl AppConfig {
         }
         if self.fq.signer.command.is_empty() {
             return Err(anyhow!("fq.signer.command 不能为空"));
+        }
+        if self.fq.cache.postgres_table.trim().is_empty() {
+            return Err(anyhow!("fq.cache.postgres_table 不能为空"));
         }
         validate_device_profile(&self.fq.device_profile, "fq.device_profile")?;
         for (index, profile) in self.fq.device_pool.iter().enumerate() {
@@ -407,6 +463,24 @@ fn set_u16(target: &mut u16, key: &str) {
     if let Ok(value) = env::var(key) {
         if let Ok(parsed) = value.parse::<u16>() {
             *target = parsed;
+        }
+    }
+}
+
+fn set_usize(target: &mut usize, key: &str) {
+    if let Ok(value) = env::var(key) {
+        if let Ok(parsed) = value.parse::<usize>() {
+            *target = parsed;
+        }
+    }
+}
+
+fn set_bool(target: &mut bool, key: &str) {
+    if let Ok(value) = env::var(key) {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => *target = true,
+            "0" | "false" | "no" | "off" => *target = false,
+            _ => {}
         }
     }
 }

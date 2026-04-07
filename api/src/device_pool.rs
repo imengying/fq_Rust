@@ -51,6 +51,39 @@ impl DevicePoolManager {
             .clone()
     }
 
+    pub fn profiles_snapshot(&self) -> Vec<DeviceProfile> {
+        self.inner
+            .lock()
+            .expect("device pool lock poisoned")
+            .profiles
+            .clone()
+    }
+
+    pub fn current_index(&self) -> Option<usize> {
+        self.inner
+            .lock()
+            .expect("device pool lock poisoned")
+            .active_index
+    }
+
+    pub fn activate_profile_by_name(&self, name: &str, reason: &str) -> bool {
+        let mut state = match self.inner.lock() {
+            Ok(state) => state,
+            Err(_) => return false,
+        };
+        let Some(target_name) = normalize_name(name) else {
+            return false;
+        };
+        let Some(index) = state
+            .profiles
+            .iter()
+            .position(|profile| active_profile_name(profile) == Some(target_name))
+        else {
+            return false;
+        };
+        activate_profile(&mut state, index, reason)
+    }
+
     pub fn rotate_if_allowed(&self, reason: &str) -> bool {
         let mut state = match self.inner.lock() {
             Ok(state) => state,
@@ -73,22 +106,29 @@ impl DevicePoolManager {
             Some(index) => index,
             None => return false,
         };
-        let next_profile = state.profiles[next_index].clone();
-        let previous_name = state.active_profile.name.clone();
-        state.active_profile = next_profile.clone();
-        state.active_index = Some(next_index);
         state.last_rotate_at_ms = now;
-
-        warn!(
-            "rotated device profile: reason={}, from={}, to={}, device_id={}, install_id={}",
-            reason,
-            previous_name,
-            next_profile.name,
-            next_profile.device.device_id,
-            next_profile.device.install_id
-        );
-        true
+        activate_profile(&mut state, next_index, reason)
     }
+}
+
+fn activate_profile(state: &mut DevicePoolState, index: usize, reason: &str) -> bool {
+    let next_profile = match state.profiles.get(index) {
+        Some(profile) => profile.clone(),
+        None => return false,
+    };
+    let previous_name = state.active_profile.name.clone();
+    state.active_profile = next_profile.clone();
+    state.active_index = Some(index);
+
+    warn!(
+        "rotated device profile: reason={}, from={}, to={}, device_id={}, install_id={}",
+        reason,
+        previous_name,
+        next_profile.name,
+        next_profile.device.device_id,
+        next_profile.device.install_id
+    );
+    true
 }
 
 fn resolve_active_index(

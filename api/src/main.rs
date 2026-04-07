@@ -1,6 +1,8 @@
+mod auto_heal;
 mod cache;
 mod config;
 mod content;
+mod db_cache;
 mod device_pool;
 mod encoding;
 mod fq;
@@ -25,7 +27,8 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> anyhow::Result<()> {
     init_tracing();
     let config = config::AppConfig::load()?;
-    let state = AppState::new(config.clone())?;
+    let state = AppState::new(config.clone()).await?;
+    upstream::run_startup_probe(&state).await;
     let app = Router::new()
         .route("/search", get(search))
         .route("/book/{book_id}", get(book))

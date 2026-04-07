@@ -1,5 +1,7 @@
+use crate::auto_heal::AutoHealManager;
 use crate::cache::TtlCache;
 use crate::config::AppConfig;
+use crate::db_cache::PgChapterCache;
 use crate::device_pool::DevicePoolManager;
 use crate::models::{BookInfo, ChapterInfo, DirectoryResponse, SearchResponse};
 use crate::registerkey::RegisterKeyService;
@@ -11,6 +13,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
+    pub auto_heal: AutoHealManager,
     pub device_pool: DevicePoolManager,
     pub http_client: reqwest::Client,
     pub signer_client: SignerClient,
@@ -18,11 +21,12 @@ pub struct AppState {
     pub directory_cache: TtlCache<DirectoryResponse>,
     pub book_cache: TtlCache<BookInfo>,
     pub chapter_cache: TtlCache<ChapterInfo>,
+    pub pg_chapter_cache: Option<PgChapterCache>,
     pub register_key_service: RegisterKeyService,
 }
 
 impl AppState {
-    pub fn new(config: AppConfig) -> Result<Arc<Self>> {
+    pub async fn new(config: AppConfig) -> Result<Arc<Self>> {
         let http_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
                 config.fq.upstream.connect_timeout_ms,
@@ -39,9 +43,35 @@ impl AppState {
             config.fq.device_pool_startup_name.clone(),
             config.fq.device_rotate_cooldown_ms,
         );
+        let auto_heal = AutoHealManager::new(
+            config.fq.auto_heal.enabled,
+            config.fq.auto_heal.error_threshold,
+            config.fq.auto_heal.window_ms,
+            config.fq.auto_heal.cooldown_ms,
+        );
+        let pg_chapter_cache = if let Some(database_url) = config
+            .fq
+            .cache
+            .postgres_url
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            Some(
+                PgChapterCache::new(
+                    database_url,
+                    &config.fq.cache.postgres_table,
+                    config.fq.cache.chapter_ttl_ms,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let config = Arc::new(config);
 
         Ok(Arc::new(Self {
+            auto_heal,
             device_pool,
             signer_client: SignerClient::new(config.fq.signer.clone())
                 .map_err(|error| anyhow!(error.message))?,
@@ -50,6 +80,7 @@ impl AppState {
             directory_cache: TtlCache::new(directory_ttl),
             book_cache: TtlCache::new(directory_ttl),
             chapter_cache: TtlCache::new(chapter_ttl),
+            pg_chapter_cache,
             register_key_service: RegisterKeyService::new(
                 config.fq.cache.register_key_ttl_ms,
                 config.fq.cache.register_key_max_entries as usize,
@@ -64,6 +95,14 @@ impl AppState {
 
     pub fn rotate_device_if_allowed(&self, reason: &str) -> bool {
         self.device_pool.rotate_if_allowed(reason)
+    }
+
+    pub fn record_success(&self) {
+        self.auto_heal.record_success();
+    }
+
+    pub fn record_failure_and_should_heal(&self) -> bool {
+        self.auto_heal.record_failure_and_should_heal()
     }
 }
 
