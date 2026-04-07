@@ -17,8 +17,11 @@ FROM gcr.io/distroless/java25-debian13:nonroot
 
 WORKDIR /app
 
+ENV UNIDBG_RESOURCE_ROOT=/app/unidbg
+
 COPY --from=rust-builder /app/target/release/fq-api /usr/local/bin/fq-api
 COPY --from=signer-builder /build/signer/target/fq-signer.jar /app/fq-signer.jar
+COPY signer/src/main/resources /app/unidbg
 COPY configs/api.example.yaml /app/configs/api.example.yaml
 
 EXPOSE 9999

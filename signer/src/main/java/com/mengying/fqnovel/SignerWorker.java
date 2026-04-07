@@ -11,6 +11,7 @@ import java.util.Base64;
 
 public final class SignerWorker {
 
+    private static final String DEFAULT_RESOURCE_ROOT = "/app/unidbg";
     private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
     private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
 
@@ -21,10 +22,7 @@ public final class SignerWorker {
         IdleFQ signer = new IdleFQ(
             Boolean.parseBoolean(System.getenv().getOrDefault("UNIDBG_VERBOSE", "false")),
             trimToNull(System.getenv("UNIDBG_APK_PATH")),
-            defaultIfNull(
-                trimToNull(System.getenv("UNIDBG_APK_CLASSPATH")),
-                "com/dragon/read/oversea/gp/apk/base.apk"
-            )
+            defaultIfNull(trimToNull(System.getenv("UNIDBG_RESOURCE_ROOT")), DEFAULT_RESOURCE_ROOT)
         );
 
         Runtime.getRuntime().addShutdownHook(new Thread(signer::destroy));

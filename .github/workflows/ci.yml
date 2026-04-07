@@ -38,5 +38,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: fq-signer
-          path: signer/target/fq-signer.jar
+          path: |
+            signer/target/fq-signer.jar
+            signer/src/main/resources
           if-no-files-found: error

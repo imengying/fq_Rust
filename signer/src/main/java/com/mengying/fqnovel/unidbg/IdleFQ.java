@@ -32,14 +32,10 @@ import org.slf4j.LoggerFactory;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 @SuppressWarnings("unchecked")
@@ -49,7 +45,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
 
     // 资源路径常量
     private static final String BASE_PATH = "com/dragon/read/oversea/gp";
-    private static final String DEFAULT_APK_CLASSPATH = BASE_PATH + "/apk/base.apk";
+    private static final String DEFAULT_APK_RESOURCE_PATH = BASE_PATH + "/apk/base.apk";
     private static final String SO_METASEC_ML_PATH = BASE_PATH + "/lib/libmetasec_ml.so";
     private static final String SO_C_SHARE_PATH = BASE_PATH + "/lib/libc++_shared.so";
     private static final String MS_CERT_FILE_PATH = BASE_PATH + "/other/ms_16777218.bin";
@@ -58,14 +54,13 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
     private static final String PACKAGE_NAME = "com.dragon.read.oversea.gp";
     private static final String APK_INSTALL_PATH = "/data/app/com.dragon.read.oversea.gp-q5NyjSN9BLSTVBJ54kg7YA==/base.apk";
     private static final int SDK_VERSION = 23;
-    private static final Map<String, File> TEMP_FILES = new ConcurrentHashMap<>();
 
     private final AndroidEmulator emulator;
     private final Module module;
     private final Memory memory;
     private final boolean loggable;
     private final String apkPath;
-    private final String apkClasspath;
+    private final String resourceRoot;
     private final ReentrantLock lifecycleLock = new ReentrantLock();
 
     // 临时文件缓存
@@ -76,10 +71,10 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
     private File tempMsCertFile;
     private volatile boolean destroyed = false;
 
-    public IdleFQ(boolean loggable, String apkPath, String apkClasspath) {
+    public IdleFQ(boolean loggable, String apkPath, String resourceRoot) {
         this.loggable = loggable;
         this.apkPath = apkPath;
-        this.apkClasspath = apkClasspath;
+        this.resourceRoot = resourceRoot;
         AndroidEmulator emulatorCandidate = null;
         Memory memoryCandidate = null;
         Module moduleCandidate = null;
@@ -146,9 +141,9 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
     private void initTempFiles() throws IOException {
         try {
             tempApkFile = resolveApkFile();
-            tempSoMetasecMlFile = getTempFile(SO_METASEC_ML_PATH);
-            tempSoCShareFile = getTempFile(SO_C_SHARE_PATH);
-            tempMsCertFile = getTempFile(MS_CERT_FILE_PATH);
+            tempSoMetasecMlFile = resolveBundledResourceFile(SO_METASEC_ML_PATH);
+            tempSoCShareFile = resolveBundledResourceFile(SO_C_SHARE_PATH);
+            tempMsCertFile = resolveBundledResourceFile(MS_CERT_FILE_PATH);
 
             // 处理rootfs目录
             tempRootfsDir = createTempDir("fq_rootfs");
@@ -199,21 +194,7 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
             return apkFile;
         }
 
-        String configuredApkClasspath = trimToNull(apkClasspath);
-        if (configuredApkClasspath != null) {
-            File classpathApk = getTempFile(configuredApkClasspath);
-            if (classpathApk != null && classpathApk.exists()) {
-                return classpathApk;
-            }
-            throw new IOException("未找到 APK classpath 资源: " + configuredApkClasspath);
-        }
-
-        File classpathApk = getTempFile(DEFAULT_APK_CLASSPATH);
-        if (classpathApk != null && classpathApk.exists()) {
-            return classpathApk;
-        }
-
-        throw new IOException("未找到 APK：请配置 application.unidbg.apk-path（本地文件）或 application.unidbg.apk-classpath（classpath 资源）；默认查找 " + DEFAULT_APK_CLASSPATH);
+        return resolveBundledResourceFile(DEFAULT_APK_RESOURCE_PATH);
     }
 
     /**
@@ -223,67 +204,18 @@ public class IdleFQ extends AbstractJni implements IOResolver<AndroidFileIO> {
         return Files.createTempDirectory(prefix).toFile();
     }
 
-    private static synchronized File getTempFile(String classpathFile) {
-        try {
-            String normalizedPath = trimToNull(classpathFile);
-            if (normalizedPath == null) {
-                return null;
-            }
-
-            String cacheKey = md5Key(normalizedPath);
-            File cached = TEMP_FILES.get(cacheKey);
-            if (cached != null && cached.exists()) {
-                return cached;
-            }
-
-            InputStream inputStream = Thread.currentThread()
-                .getContextClassLoader()
-                .getResourceAsStream(normalizedPath);
-            if (inputStream == null) {
-                log.error("资源文件不存在: {}", normalizedPath);
-                return null;
-            }
-
-            String extension = fileExtensionOf(normalizedPath);
-            File tempFile = File.createTempFile("unidbg_", extension);
-            tempFile.deleteOnExit();
-
-            try (InputStream is = inputStream;
-                 FileOutputStream fos = new FileOutputStream(tempFile)) {
-                is.transferTo(fos);
-            }
-
-            TEMP_FILES.put(cacheKey, tempFile);
-            if (log.isDebugEnabled()) {
-                log.debug("临时文件创建成功: {} -> {}", normalizedPath, tempFile.getAbsolutePath());
-            }
-            return tempFile;
-        } catch (IOException e) {
-            log.error("创建临时文件失败: {}", classpathFile, e);
-            return null;
+    private File resolveBundledResourceFile(String relativePath) throws IOException {
+        String normalizedRoot = trimToNull(resourceRoot);
+        if (normalizedRoot == null) {
+            throw new IOException("未配置 UNIDBG_RESOURCE_ROOT");
         }
-    }
 
-    private static String md5Key(String path) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("MD5");
-            byte[] hashed = digest.digest(path.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (byte value : hashed) {
-                builder.append(String.format("%02x", value));
-            }
-            return builder.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("计算缓存键失败", e);
+        Path filePath = Path.of(normalizedRoot).resolve(relativePath).normalize();
+        File file = filePath.toFile();
+        if (!file.exists() || !file.isFile()) {
+            throw new IOException("资源文件不存在: " + file.getAbsolutePath());
         }
-    }
-
-    private static String fileExtensionOf(String path) {
-        int dotIndex = path.lastIndexOf(".");
-        if (dotIndex <= 0) {
-            return "";
-        }
-        return path.substring(dotIndex);
+        return file;
     }
 
     private static String trimToNull(String value) {

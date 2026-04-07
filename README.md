@@ -6,6 +6,7 @@
 - Rust 负责 `registerkey` 请求、缓存和解密 key 解析
 - Java 只保留 `unidbg signer`，作为 Rust 拉起的内部 worker
 - 容器主进程只有 `fq-api`，Java worker 通过极简 `stdin/stdout` 行协议和 Rust 通信
+- unidbg 资源不再从 jar 内临时解压，运行时直接读取镜像内 `/app/unidbg`
 
 ## 代码结构
 
@@ -59,10 +60,10 @@ fq:
 
 本地有 Rust / Java / Maven 时，最短路径如下：
 
-1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备信息和上游配置。
+1. 复制 `configs/api.example.yaml` 为 `configs/api.yaml`，按需修改设备信息、上游配置，以及 `fq.signer.command` 里的 jar 路径。
 2. 构建 Java worker：`mvn -f signer/pom.xml -DskipTests package`
 3. 构建 Rust API：`cargo build --release`
-4. 启动服务：`./target/release/fq-api`
+4. 以源码资源目录启动：`UNIDBG_RESOURCE_ROOT="$PWD/signer/src/main/resources" ./target/release/fq-api`
 
 如果本地没有环境，也可以直接依赖 GitHub Actions 产物或 Docker。
 
@@ -81,6 +82,7 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 
 - Rust：`cargo test`、`cargo build --release`
 - Java：`mvn -B -DskipTests package`
+- `fq-signer` artifact 会同时带上 jar 和 `signer/src/main/resources` 资源目录
 - 构建产物会作为 artifact 上传
 
 ## Docker
@@ -88,6 +90,7 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 当前按单镜像部署：
 
 - 构建阶段分别编译 Rust 与 Java
+- unidbg 资源目录会直接拷到 `/app/unidbg`
 - 运行阶段使用 `gcr.io/distroless/java25-debian13:nonroot`
 - 镜像入口是 `fq-api`
 
