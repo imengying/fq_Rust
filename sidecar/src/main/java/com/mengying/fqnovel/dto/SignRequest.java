@@ -1,10 +1,9 @@
 package com.mengying.fqnovel.dto;
 
-import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record SignRequest(
     String url,
-    Map<String, String> headers
+    @JsonProperty("headers_text") String headersText
 ) {
 }
-

@@ -4,8 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mengying.fqnovel.config.UnidbgProperties;
 import com.mengying.fqnovel.dto.*;
-import com.mengying.fqnovel.service.FQEncryptService;
-import com.mengying.fqnovel.utils.ProcessLifecycle;
+import com.mengying.fqnovel.unidbg.IdleFQ;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,7 +13,6 @@ import java.io.BufferedWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.UUID;
 
 public final class SidecarWorker {
@@ -27,10 +25,13 @@ public final class SidecarWorker {
 
     public static void main(String[] args) throws Exception {
         UnidbgProperties unidbgProperties = UnidbgProperties.fromEnv();
-        FQEncryptService signer = new FQEncryptService(unidbgProperties);
+        IdleFQ signer = new IdleFQ(
+            unidbgProperties.isVerbose(),
+            unidbgProperties.getApkPath(),
+            unidbgProperties.getApkClasspath()
+        );
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            ProcessLifecycle.markShuttingDown("worker-shutdown");
             signer.destroy();
         }));
 
@@ -55,7 +56,7 @@ public final class SidecarWorker {
 
     private static WorkerResponse<?> handle(
         String line,
-        FQEncryptService signer
+        IdleFQ signer
     ) {
         WorkerRequest request;
         try {
@@ -85,18 +86,18 @@ public final class SidecarWorker {
         }
     }
 
-    private static WorkerResponse<?> handleSign(String requestId, JsonNode params, FQEncryptService signer) {
+    private static WorkerResponse<?> handleSign(String requestId, JsonNode params, IdleFQ signer) {
         SignRequest request = MAPPER.convertValue(params, SignRequest.class);
         if (request.url() == null || request.url().isBlank()) {
             throw new IllegalArgumentException("url 不能为空");
         }
-        if (request.headers() == null) {
-            throw new IllegalArgumentException("headers 不能为空");
+        if (request.headersText() == null) {
+            throw new IllegalArgumentException("headers_text 不能为空");
         }
-        var signed = signer.generateSignatureHeaders(request.url(), request.headers());
-        if (signed == null || signed.isEmpty()) {
+        String raw = signer.generateSignature(request.url(), request.headersText());
+        if (raw == null || raw.isBlank()) {
             return WorkerResponse.error(requestId, 1003, "signer unavailable");
         }
-        return WorkerResponse.success(requestId, new SignResult(new LinkedHashMap<>(signed)));
+        return WorkerResponse.success(requestId, new SignResult(raw));
     }
 }

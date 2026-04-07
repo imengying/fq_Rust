@@ -31,8 +31,12 @@ impl SidecarClient {
     }
 
     pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
-        let params = serde_json::to_value(SignRequest { url, headers })
-            .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
+        let headers_text = build_signature_input_headers(headers);
+        let params = serde_json::to_value(SignRequest {
+            url,
+            headers_text: &headers_text,
+        })
+        .map_err(|error| ServiceError::internal(format!("sidecar 请求序列化失败: {error}")))?;
         let inner = self.inner.clone();
         task::spawn_blocking(move || {
             let mut process = inner
@@ -40,33 +44,21 @@ impl SidecarClient {
                 .map_err(|_| ServiceError::internal("sidecar 进程锁异常"))?;
 
             match process.call::<JavaSignResult>("sign", params.clone()) {
-                Ok(data) => Ok(SignResult { headers: data.headers }),
+                Ok(data) => Ok(SignResult {
+                    headers: parse_signature_result(&data.raw)?,
+                }),
                 Err(error) => {
                     if process.should_restart_after_sign_error(&error)
                         && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
                     {
                         let data = process.call::<JavaSignResult>("sign", params)?;
-                        return Ok(SignResult { headers: data.headers });
+                        return Ok(SignResult {
+                            headers: parse_signature_result(&data.raw)?,
+                        });
                     }
                     Err(error)
                 }
             }
-        })
-        .await
-        .map_err(|error| ServiceError::internal(format!("sidecar 请求执行失败: {error}")))?
-    }
-
-    async fn request<T>(&self, method: &str, params: Value) -> ServiceResult<T>
-    where
-        T: DeserializeOwned + Send + 'static,
-    {
-        let method = method.to_string();
-        let inner = self.inner.clone();
-        task::spawn_blocking(move || {
-            let mut process = inner
-                .lock()
-                .map_err(|_| ServiceError::internal("sidecar 进程锁异常"))?;
-            process.call(&method, params)
         })
         .await
         .map_err(|error| ServiceError::internal(format!("sidecar 请求执行失败: {error}")))?
@@ -233,7 +225,7 @@ impl Drop for SidecarProcess {
 #[derive(Serialize)]
 struct SignRequest<'a> {
     url: &'a str,
-    headers: &'a IndexMap<String, String>,
+    headers_text: &'a str,
 }
 
 #[derive(Serialize)]
@@ -252,7 +244,7 @@ struct WorkerResponse<T> {
 
 #[derive(Deserialize)]
 struct JavaSignResult {
-    headers: IndexMap<String, String>,
+    raw: String,
 }
 
 fn truncate(value: &str, max_len: usize) -> String {
@@ -268,4 +260,94 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as i64)
         .unwrap_or(0)
+}
+
+fn build_signature_input_headers(headers: &IndexMap<String, String>) -> String {
+    let mut builder = String::new();
+    let mut first = true;
+    for (key, value) in headers {
+        if !first {
+            builder.push_str("\r\n");
+        }
+        builder.push_str(key);
+        builder.push_str("\r\n");
+        builder.push_str(value);
+        first = false;
+    }
+    builder
+}
+
+fn parse_signature_result(raw: &str) -> ServiceResult<IndexMap<String, String>> {
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return Err(ServiceError::internal("sidecar 返回空签名结果"));
+    }
+
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        let parsed: IndexMap<String, String> = serde_json::from_str(trimmed)
+            .map_err(|error| ServiceError::internal(format!("sidecar 签名 JSON 解析失败: {error}")))?;
+        return Ok(remove_header_ignore_case(parsed, "X-Neptune"));
+    }
+
+    let lines: Vec<&str> = trimmed.split('\n').collect();
+    let mut result = IndexMap::new();
+
+    if looks_like_colon_pairs(&lines) {
+        for line in lines {
+            let value = line.trim();
+            if value.is_empty() {
+                continue;
+            }
+            if let Some((key, raw_value)) = value.split_once(':') {
+                put_header(&mut result, key, raw_value);
+            }
+        }
+    } else if lines.len() >= 2 && lines.len() % 2 == 0 {
+        for pair in lines.chunks(2) {
+            if let [key, value] = pair {
+                put_header(&mut result, key, value);
+            }
+        }
+    } else {
+        for line in lines {
+            let value = line.trim();
+            if value.is_empty() {
+                continue;
+            }
+            if let Some((key, raw_value)) = value.split_once('=') {
+                put_header(&mut result, key, raw_value);
+            }
+        }
+    }
+
+    Ok(remove_header_ignore_case(result, "X-Neptune"))
+}
+
+fn looks_like_colon_pairs(lines: &[&str]) -> bool {
+    lines.iter().any(|line| {
+        let trimmed = line.trim();
+        let Some(index) = trimmed.find(':') else {
+            return false;
+        };
+        index > 0 && index < trimmed.len() - 1
+    })
+}
+
+fn put_header(result: &mut IndexMap<String, String>, raw_key: &str, raw_value: &str) {
+    let key = raw_key.trim();
+    if key.is_empty() {
+        return;
+    }
+    result.insert(key.to_string(), raw_value.trim().to_string());
+}
+
+fn remove_header_ignore_case(
+    headers: IndexMap<String, String>,
+    target: &str,
+) -> IndexMap<String, String> {
+    headers
+        .into_iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case(target))
+        .collect()
 }
