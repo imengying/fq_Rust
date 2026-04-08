@@ -8,16 +8,18 @@ pub(crate) fn resolve_library_static<T: Clone>(emulator: &AndroidEmulator<T>, li
         info!("resolve_library_static: {}", library_name);
     }
     let base_path = emulator.inner_mut().base_path.as_str();
-    let lib64_path = Path::new(&if base_path.is_empty() {
+    let lib64_root = if base_path.is_empty() {
         "./android/sdk31/system/lib64".to_string()
     } else {
         format!("{}/system/lib64", base_path)
-    });
-    let bin_path = Path::new(&if base_path.is_empty() {
+    };
+    let bin_root = if base_path.is_empty() {
         "./android/sdk31/system/bin".to_string()
     } else {
         format!("{}/system/bin", base_path)
-    });
+    };
+    let lib64_path = Path::new(&lib64_root);
+    let bin_path = Path::new(&bin_root);
 
     let mut path = lib64_path.join(library_name);
     if !path.exists() && library_name == "ld-android.so" {
