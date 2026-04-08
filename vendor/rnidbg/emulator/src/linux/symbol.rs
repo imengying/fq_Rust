@@ -113,6 +113,37 @@ impl ModuleSymbol {
         }
 
         match symbol_name.as_str() {
+            "__cxa_finalize" | "__register_atfork" | "__cxa_atexit" => {
+                let hash = tool::calculate_hash(&format!("{}#{}", "libc.so", symbol_name));
+
+                if cache_hook.contains_key(&hash) {
+                    return Ok(ModuleSymbol::new(
+                        self.so_name.to_string(),
+                        WEAK_BASE,
+                        self.symbol.clone(),
+                        self.relocation_addr,
+                        "libc.so".to_string(),
+                        *cache_hook.get(&hash).unwrap()
+                    ));
+                }
+
+                for listener in listeners {
+                    let hook = listener.hook(&emulator, "libc.so".to_string(), symbol_name.to_string(), self.offset);
+                    if hook > 0 {
+                        cache_hook.insert(hash, hook);
+                        return Ok(ModuleSymbol::new(
+                            self.so_name.clone(),
+                            WEAK_BASE,
+                            self.symbol.clone(),
+                            self.relocation_addr,
+                            "libc.so".to_string(),
+                            hook
+                        ));
+                    }
+                }
+
+                Err(anyhow!("Failed to resolve symbol: {}", symbol_name))
+            }
             "dlopen" | "dlclose" | "dlsym" | "dlerror" | "dladdr" |
             "android_update_LD_LIBRARY_PATH" | "android_get_LD_LIBRARY_PATH" | "dl_iterate_phdr" |
             "android_dlopen_ext" | "android_set_application_target_sdk_version" |

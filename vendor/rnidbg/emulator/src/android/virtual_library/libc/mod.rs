@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use log::info;
 use crate::emulator::{AndroidEmulator, VMPointer};
-use crate::memory::svc_memory::{HookListener, SvcMemory};
+use crate::memory::svc_memory::{HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory};
 
 pub(super) mod system_properties;
 mod memory;
@@ -18,6 +18,10 @@ pub struct Libc<'a, T> {
 
 
     pd: PhantomData<&'a T>,
+}
+
+fn return_zero<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
+    SvcCallResult::RET(0)
 }
 
 impl<T: Clone> Libc<'_, T> {
@@ -46,6 +50,9 @@ impl<'a, T: Clone> HookListener<'a, T> for Libc<'a, T> {
             "__system_property_get" => svc.register_svc(Box::new(system_properties::SystemPropertyGet::new(self.system_property_service.clone()))),
             "__system_property_find" => svc.register_svc(Box::new(system_properties::SystemPropertyFind::new(self.system_property_service.clone()))),
             "__system_property_read" => svc.register_svc(Box::new(system_properties::SystemPropertyRead::new(self.system_property_service.clone()))),
+            "__cxa_finalize" => svc.register_svc(SimpleArm64Svc::new("__cxa_finalize", return_zero)),
+            "__register_atfork" => svc.register_svc(SimpleArm64Svc::new("__register_atfork", return_zero)),
+            "__cxa_atexit" => svc.register_svc(SimpleArm64Svc::new("__cxa_atexit", return_zero)),
             "strcmp" => svc.register_svc(Box::new(string::StrCmp)),
             "strncmp" => svc.register_svc(Box::new(string::StrNCmp)),
             "strcasecmp" => svc.register_svc(Box::new(string::StrCaseCmp)),
