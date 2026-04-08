@@ -34,6 +34,7 @@ const APK_INSTALL_PATH: &str =
 const APP_UID: i32 = 10074;
 const APP_VERSION_CODE: i32 = 68132;
 const SIGN_FUNCTION_OFFSET: u64 = 0x168c80;
+const ANDROID_TARGET_SDK: i64 = 31;
 
 const MS_METHOD_DATA_PATH: i32 = 65539;
 const MS_METHOD_BOOL_1: i32 = 33554433;
@@ -478,8 +479,63 @@ fn register_libc_hooks(emulator: &mut AndroidEmulator<'static, ()>, android_sdk_
 }
 
 fn register_virtual_modules(emulator: &mut AndroidEmulator<'static, ()>) {
+    register_ld_android(emulator);
     register_libandroid(emulator);
     register_libjnigraphics(emulator);
+}
+
+fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
+    let svc = emulator.svc_memory_mut();
+    let mut symbol = HashMap::new();
+    symbol.insert(
+        "dlopen".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("dlopen", ret_zero)),
+    );
+    symbol.insert(
+        "dlclose".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("dlclose", ret_zero)),
+    );
+    symbol.insert(
+        "dlsym".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("dlsym", ret_zero)),
+    );
+    symbol.insert(
+        "dlerror".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("dlerror", ret_zero)),
+    );
+    symbol.insert(
+        "android_dlopen_ext".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("android_dlopen_ext", ret_zero)),
+    );
+    symbol.insert(
+        "android_get_application_target_sdk_version".to_string(),
+        svc.register_svc(SimpleArm64Svc::new(
+            "android_get_application_target_sdk_version",
+            ret_target_sdk,
+        )),
+    );
+    symbol.insert(
+        "__loader_shared_globals".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_shared_globals", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_add_thread_local_dtor".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_add_thread_local_dtor", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_remove_thread_local_dtor".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_remove_thread_local_dtor", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_android_get_exported_namespace".to_string(),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_android_get_exported_namespace",
+            ret_zero,
+        )),
+    );
+    let _ = emulator
+        .memory()
+        .load_virtual_module("ld-android.so".to_string(), symbol);
 }
 
 fn register_libandroid(emulator: &mut AndroidEmulator<'static, ()>) {
@@ -556,6 +612,10 @@ fn ret_zero<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
 
 fn ret_one<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
     SvcCallResult::RET(1)
+}
+
+fn ret_target_sdk<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
+    SvcCallResult::RET(ANDROID_TARGET_SDK)
 }
 
 fn install_file_resolver(emulator: &mut AndroidEmulator<'static, ()>, resources: &Resources) {
