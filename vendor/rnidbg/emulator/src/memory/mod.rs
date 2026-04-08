@@ -435,7 +435,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                     }
                 }
                 R_AARCH64_TLS_TPREL => {
-                    let value = sym_value.wrapping_add(relocation.addend as u64);
+                    let value = sym_value.wrapping_add(relocation.addend) as u64;
                     relocation_addr.write_u64(value)?;
                     warn!(
                         "Approximated R_AARCH64_TLS_TPREL relocation at 0x{:X} with value 0x{:X}",
