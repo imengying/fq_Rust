@@ -434,6 +434,26 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                         resolved_symbols.push(module_symbol.unwrap());
                     }
                 }
+                R_AARCH64_TLS_TPREL => {
+                    let value = sym_value.wrapping_add(relocation.addend as u64);
+                    relocation_addr.write_u64(value)?;
+                    warn!(
+                        "Approximated R_AARCH64_TLS_TPREL relocation at 0x{:X} with value 0x{:X}",
+                        relocation_addr.addr,
+                        value
+                    );
+                }
+                R_AARCH64_IRELATIVE => {
+                    let resolver = load_base + relocation.addend as u64;
+                    let resolved = emulator.e_func(resolver, vec![]).unwrap_or(0);
+                    relocation_addr.write_u64(resolved)?;
+                    warn!(
+                        "Resolved R_AARCH64_IRELATIVE relocation at 0x{:X} via 0x{:X} -> 0x{:X}",
+                        relocation_addr.addr,
+                        resolver,
+                        resolved
+                    );
+                }
                 R_AARCH64_COPY => {
                     panic!("R_AARCH64_COPY relocations are not supported")
                 }

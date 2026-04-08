@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 use anyhow::{anyhow, Error};
 use bytes::{Buf, BufMut, BytesMut};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use crate::backend::RegisterARM64;
 use crate::emulator::{AndroidEmulator, POST_CALLBACK_SYSCALL_NUMBER, VMPointer};
 use crate::keystone;
@@ -10,7 +10,7 @@ use crate::emulator::memory::MemoryBlockTrait;
 use crate::linux::errno::Errno;
 use crate::linux::PAGE_ALIGN;
 use crate::linux::structs::DlInfo;
-use crate::memory::svc_memory::{Arm64Svc, assemble_svc, HookListener, SvcMemory, SvcCallResult};
+use crate::memory::svc_memory::{Arm64Svc, assemble_svc, HookListener, SimpleArm64Svc, SvcMemory, SvcCallResult};
 use crate::memory::svc_memory::SvcCallResult::{FUCK, RET, VOID};
 
 struct DlIteratePhdr;
@@ -20,6 +20,16 @@ struct DlOpen<'a, T: Clone>(pub VMPointer<'a, T>);
 struct DlAddr;
 struct DlSym;
 struct DlUnwindFindExidx;
+
+const DEFAULT_ANDROID_TARGET_SDK: i64 = 31;
+
+fn return_zero<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
+    RET(0)
+}
+
+fn return_target_sdk<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
+    RET(DEFAULT_ANDROID_TARGET_SDK)
+}
 
 pub struct ArmLD64<'a, T: Clone> {
     error: VMPointer<'a, T>,
@@ -45,10 +55,23 @@ impl<'a, T: Clone> HookListener<'a, T> for ArmLD64<'a, T> {
             "dl_iterate_phdr" => svc.register_svc(Box::new(DlIteratePhdr)) ,
             "dlerror" => svc.register_svc(Box::new(DlError(self.error.clone()))),
             "dlclose" => svc.register_svc(Box::new(DlClose(self.error.clone()))),
-            "dlopen" => svc.register_svc(Box::new(DlOpen(self.error.clone()))),
+            "dlopen" | "android_dlopen_ext" => svc.register_svc(Box::new(DlOpen(self.error.clone()))),
             "dladdr" => svc.register_svc(Box::new(DlAddr)),
-            "dlsym" => svc.register_svc(Box::new(DlSym)),
+            "dlsym" | "dlvsym" => svc.register_svc(Box::new(DlSym)),
             "dl_unwind_find_exidx" => svc.register_svc(Box::new(DlUnwindFindExidx)),
+            "android_update_LD_LIBRARY_PATH"
+            | "android_init_namespaces"
+            | "android_create_namespace"
+            | "android_dlwarning"
+            | "android_set_application_target_sdk_version" => {
+                svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_zero))
+            }
+            "android_get_LD_LIBRARY_PATH" => {
+                svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_zero))
+            }
+            "android_get_application_target_sdk_version" => {
+                svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_target_sdk))
+            }
             _ => panic!("[libdl] symbol not found: {}", symbol_name)
         }
     }
@@ -192,7 +215,8 @@ impl<T: Clone> Arm64Svc<T> for DlError<'_, T> {
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        panic!("dlerror not supported");
+        let _ = self.0.write_c_string("");
+        RET(self.0.addr as i64)
     }
 }
 
@@ -202,7 +226,7 @@ impl<T: Clone> Arm64Svc<T> for DlClose<'_, T> {
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        panic!("dlclose not supported")
+        RET(0)
     }
 }
 
@@ -270,10 +294,15 @@ impl<T: Clone> Arm64Svc<T> for DlOpen<'_, T> {
             emu.backend.reg_write(RegisterARM64::SP, pointer.addr).unwrap();
             return RET(0)
         } else {
-            panic!("dlopen not supported");
+            warn!("dlopen unsupported, returning null: {}", file_name);
+            let _ = self.0.write_c_string(format!("dlopen unsupported: {}", file_name).as_str());
+            pointer.write_u64(0).unwrap();
+            let pointer = pointer.share_with_size(-8, 0);
+            pointer.write_u64(0).unwrap();
+            emu.set_errno(Errno::ENOENT.as_i32()).unwrap();
+            emu.backend.reg_write(RegisterARM64::SP, pointer.addr).unwrap();
+            return RET(0);
         }
-
-        FUCK(anyhow!("dlopen not supported"))
     }
 }
 
@@ -351,7 +380,7 @@ impl<T: Clone> Arm64Svc<T> for DlSym {
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        panic!("dlsym not supported")
+        RET(0)
     }
 }
 
@@ -361,6 +390,6 @@ impl<T: Clone> Arm64Svc<T> for DlUnwindFindExidx {
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        panic!("DlUnwindFindExidx not supported")
+        RET(0)
     }
 }
