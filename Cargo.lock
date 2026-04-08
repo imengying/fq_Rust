@@ -711,6 +711,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "flate2",
+ "fq-signer-native",
  "indexmap",
  "once_cell",
  "pretty_assertions",
