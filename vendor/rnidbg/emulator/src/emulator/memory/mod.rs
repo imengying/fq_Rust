@@ -332,8 +332,17 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         }
 
         let aligned = ((length as usize - 1) / PAGE_ALIGN + 1) * PAGE_ALIGN;
-        self.backend.mem_unmap(start, aligned)
-            .map_err(|e| anyhow!("munmap failed: {:?}", e))?;
+        if let Err(e) = self.backend.mem_unmap(start, aligned) {
+            let msg = format!("{:?}", e);
+            if msg.contains("NOMEM") {
+                // Linux allows munmap on already-unmapped pages; treat as non-fatal.
+                if option_env!("PRINT_MMAP_LOG") == Some("1") {
+                    eprintln!("munmap ignore backend NOMEM: start=0x{:X}, aligned=0x{:X}", start, aligned);
+                }
+            } else {
+                return Err(anyhow!("munmap failed: {:?}", e));
+            }
+        }
 
         let memory = &mut self.inner_mut().memory;
         let mem_map = &mut memory.memory_map;
@@ -341,7 +350,8 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         if removed.is_none() {
             let sg = find_segment(mem_map, start);
             if sg.is_none() {
-                return Err(anyhow!("munmap failed, start=0x{:X}", start));
+                // Already-unmapped range: keep Linux-compatible no-op behavior.
+                return Ok(());
             }
             let sg = sg.unwrap().1;
             if sg.size < aligned {
