@@ -749,7 +749,12 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         argv.write_u64_with_offset(2 * 8, environ.addr)?;
         argv.write_u64_with_offset(3 * 8, auxv.addr)?;
 
-        let tls = self.allocate_stack(0x80 * 4); // tls size
+        let tls = self.allocate_stack(0x80 * 4 + 0x1000); // tls size: extra room for bionic TLS slots
+        // Zero-fill the entire TLS region so that libc's locale and other TLS variables default to
+        // NULL/0, preventing dereferences of uninitialized garbage pointers.
+        let tls_zero = vec![0u8; 0x80 * 4 + 0x1000];
+        self.backend.mem_write(tls.addr, &tls_zero)
+            .expect("failed to zero-fill TLS region");
         //tls.write_u64_with_offset(0, 0x11_45_14).unwrap();
         tls.write_u64_with_offset(8, thread.addr).unwrap();
         let errno = tls.share(8 * 2);
