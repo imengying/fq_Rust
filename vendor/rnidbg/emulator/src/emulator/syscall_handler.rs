@@ -274,6 +274,17 @@ fn syscall<'a, T: Clone>(nr: Syscalls, backend: &Backend<'a, T>, emulator: &Andr
             // Signal handling is not needed in the emulator; just return success.
             backend.reg_write_i64(RegisterARM64::X0, 0).unwrap();
         }
+        Syscalls::__NR_sched_getaffinity => {
+            // pid=X0, cpusetsize=X1, mask=X2
+            let mask_ptr = backend.reg_read(RegisterARM64::X2).unwrap();
+            let cpusetsize = backend.reg_read(RegisterARM64::X1).unwrap() as usize;
+            let mut buf = vec![0u8; cpusetsize];
+            if !buf.is_empty() {
+                buf[0] = 0xFF; // 8 CPUs
+            }
+            backend.mem_write(mask_ptr, &buf).unwrap();
+            backend.reg_write_i64(RegisterARM64::X0, 0).unwrap();
+        }
         _ => {
             info!("Unsupported syscall: {:?}", nr);
             backend.emu_stop(TaskStatus::X, emulator)
