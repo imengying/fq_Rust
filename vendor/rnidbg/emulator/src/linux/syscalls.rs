@@ -1269,6 +1269,73 @@ pub fn syscall_write<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
     }
 }
 
+pub fn syscall_writev<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
+    let fd = ldr_i32!(backend, X0);
+    let iov = ldr_u64!(backend, X1);
+    let iovcnt = ldr_i32!(backend, X2) as usize;
+
+    let from_module = emulator.find_caller_name();
+    let file_system = &mut emulator.inner_mut().file_system;
+    if let Some(file) = file_system.get_file_mut(fd) {
+        let mode = match file {
+            FileIO::Bytes(bytes) => bytes.st_mode(),
+            FileIO::File(file) => file.st_mode(),
+            FileIO::Error(_) => {
+                throw_err!(backend, emulator, Errno::EBADF);
+            }
+            FileIO::Dynamic(file) => file.st_mode(),
+            FileIO::Direction(_) => unreachable!(),
+            FileIO::LocalSocket(_) => StMode::S_IRUSR | StMode::S_IWUSR,
+        };
+
+        if !(mode.contains(StMode::S_IWUSR)
+            || mode.contains(StMode::S_IWOTH)
+            || mode.contains(StMode::S_IWGRP))
+            && from_module != "libc.so"
+        {
+            throw_err!(backend, emulator, Errno::EACCES);
+        }
+
+        let mut total_written: i64 = 0;
+        for index in 0..iovcnt {
+            let entry = iov + (index as u64) * 16;
+            let base = backend.mem_read_u64(entry).unwrap_or(0);
+            let len = backend.mem_read_u64(entry + 8).unwrap_or(0) as usize;
+            if len == 0 {
+                continue;
+            }
+
+            let data = backend.mem_read_as_vec(base, len).unwrap();
+            let written = match file {
+                FileIO::Bytes(file) => file.write(data.as_slice()),
+                FileIO::File(file) => file.write(data.as_slice()),
+                FileIO::Error(_) => unreachable!(),
+                FileIO::Dynamic(file) => file.write(data.as_slice()),
+                FileIO::Direction(_) => unreachable!(),
+                FileIO::LocalSocket(socket) => {
+                    <LocalSocket as FileIOTrait<T>>::write(socket, data.as_slice())
+                }
+            };
+
+            if written == -1 {
+                throw_err!(backend, emulator, Errno::EACCES);
+            }
+            total_written += written as i64;
+        }
+
+        if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+            println!(
+                "syscall writev(fd={}, iov=0x{:x}, iovcnt={}) => {} from {}",
+                fd, iov, iovcnt, total_written, from_module
+            );
+        }
+
+        ret_i32!(backend, total_written as i32);
+    } else {
+        throw_err!(backend, emulator, Errno::EBADF);
+    }
+}
+
 pub fn syscall_socket<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
     let domain = Pf::from_u32(ldr_u32!(backend, X0));
     let typ = SockType::from_bits_truncate(ldr_u32!(backend, X1));

@@ -258,6 +258,9 @@ fn syscall<'a, T: Clone>(nr: Syscalls, backend: &Backend<'a, T>, emulator: &Andr
         Syscalls::__NR_write => {
             syscalls::syscall_write(backend, emulator);
         }
+        Syscalls::__NR_writev => {
+            syscalls::syscall_writev(backend, emulator);
+        }
         Syscalls::__NR_socket => {
             syscalls::syscall_socket(backend, emulator);
         }
