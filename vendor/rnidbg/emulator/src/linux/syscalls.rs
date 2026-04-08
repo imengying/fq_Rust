@@ -1091,6 +1091,7 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
     let path = ldr_string!(backend, X1);
     let mode = ldr_i32!(backend, X2);
     let flag = ldr_i32!(backend, X3);
+    let from_module = emulator.find_caller_name();
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         println!("syscall faccessat(dir_fd={}, path={}, mode={}, flag={})", dir_fd, path, mode, flag);
@@ -1146,7 +1147,41 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
         }
     }
 
-    panic!()
+    let (fd, errno) = open(
+        emulator,
+        &path,
+        OFlag::empty(),
+        mode,
+        &from_module,
+    );
+
+    if fd >= 0 {
+        let file_system = &mut emulator.inner_mut().file_system;
+        if let Some(file) = file_system.remove_file(fd) {
+            match file {
+                FileIO::Bytes(_) => {}
+                FileIO::File(mut file) => file.close(),
+                FileIO::Error(_) => {}
+                FileIO::Dynamic(mut file) => file.close(),
+                FileIO::Direction(_) => {}
+                FileIO::LocalSocket(mut socket) => {
+                    <LocalSocket as FileIOTrait<T>>::close(&mut socket);
+                }
+            }
+        }
+        ret_i32!(backend, 0);
+        emulator.set_errno(0).expect("failed to set errno");
+        return;
+    }
+
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        println!(
+            "syscall faccessat(dir_fd={}, path={}, mode={}, flag={}) => errno={} from {}",
+            dir_fd, path, mode, flag, errno, from_module
+        );
+    }
+    backend.reg_write_i64(RegisterARM64::X0, -(errno as i64)).unwrap();
+    emulator.set_errno(errno).expect("failed to set errno");
 }
 
 pub fn syscall_getdents64<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
