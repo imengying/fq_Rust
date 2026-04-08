@@ -1340,6 +1340,35 @@ pub fn syscall_nr3264_fcntl<T: Clone>(backend: &Backend<T>, emulator: &AndroidEm
     panic!();
 }
 
+pub fn syscall_getrandom<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
+    let buf = ldr_u64!(backend, X0);
+    let buflen = ldr_u64!(backend, X1) as usize;
+    let _flags = ldr_u32!(backend, X2);
+
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        println!("syscall getrandom(buf=0x{:x}, buflen={}, flags={})", buf, buflen, _flags);
+    }
+
+    if buflen == 0 {
+        ret_i32!(backend, 0);
+        return;
+    }
+
+    let mut random_bytes = vec![0u8; buflen];
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let mut state = seed ^ 0x6c62_272e_07bb_0142;
+    for byte in random_bytes.iter_mut() {
+        state = state.wrapping_mul(0x5851_f42d_4c95_7f2d).wrapping_add(0x1405_7b7e_f767_814f);
+        *byte = (state >> 33) as u8;
+    }
+    backend.mem_write(buf, &random_bytes).expect("failed to write getrandom buffer");
+
+    ret_i32!(backend, buflen as i32);
+}
+
 #[inline]
 fn open<T: Clone>(emulator: &AndroidEmulator<T>, path: &str, flags: OFlag, mode: i32, from_module: &str) -> (i32, i32) {
     if path == "/dev/__properties__" {

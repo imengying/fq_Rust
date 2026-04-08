@@ -267,6 +267,9 @@ fn syscall<'a, T: Clone>(nr: Syscalls, backend: &Backend<'a, T>, emulator: &Andr
         Syscalls::__NR_pipe2 => {
             syscalls::syscall_pipe2(backend, emulator);
         }
+        Syscalls::__NR_getrandom => {
+            syscalls::syscall_getrandom(backend, emulator);
+        }
         _ => {
             info!("Unsupported syscall: {:?}", nr);
             backend.emu_stop(TaskStatus::X, emulator)
