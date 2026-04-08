@@ -17,12 +17,7 @@ FROM gcr.io/distroless/cc-debian12:nonroot
 
 WORKDIR /app
 
-ENV FQ_SIGNER_RESOURCE_ROOT=/app/resources
-ENV RNIDBG_BASE_PATH=/app/rnidbg-sdk
-
 COPY --from=rust-builder /app/target/release/fq-api /usr/local/bin/fq-api
-COPY third_party/rnidbg/android/sdk23 /app/rnidbg-sdk
-COPY resources /app/resources
 COPY configs/config.yaml /app/configs/config.yaml
 
 EXPOSE 9999

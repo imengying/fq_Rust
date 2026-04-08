@@ -7,13 +7,14 @@
 - Rust 负责对外 HTTP API、上游请求编排、缓存和内容解密
 - Rust 负责 `registerkey` 请求、缓存和解密 key 解析
 - Rust 原生 `rnidbg` signer 已内嵌进 `fq-api`
+- signer 资源和 `sdk23` 也已编进 `fq-api`，启动时自动解包到临时目录
 - Java signer、Maven 构建链、`unidbg` jar 回退路径已删除
 
 ## 代码结构
 
 - `api`: Rust API 服务
 - `signer-native`: Rust 原生 signer 库
-- `resources`: signer 运行时资源
+- `resources`: 构建期嵌入的 signer 资源源码
 - `third_party/rnidbg`: Rust 原生 Android 模拟运行时
 - `configs/config.yaml`: 默认配置
 - `.github/workflows/ci.yml`: 编译与测试
@@ -51,6 +52,7 @@
 
 兼容保留：
 
+- 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
 
 ## 本地运行
@@ -65,8 +67,6 @@ cargo build --release --workspace
 3. 启动：
 
 ```bash
-FQ_SIGNER_RESOURCE_ROOT="$PWD/resources" \
-RNIDBG_BASE_PATH="$PWD/third_party/rnidbg/android/sdk23" \
 ./target/release/fq-api
 ```
 
@@ -86,8 +86,6 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 - `cargo test --workspace`
 - `cargo build --workspace --release`
 - 上传 `fq-api`
-- 上传 `fq-runtime-assets`：
-  `resources`、`third_party/rnidbg/android/sdk23`、`configs/config.yaml`
 
 ## Docker
 
@@ -95,8 +93,8 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 
 - 只构建 Rust
 - 运行阶段不再需要 Java
-- signer 资源目录拷到 `/app/resources`
-- rnidbg Android SDK 拷到 `/app/rnidbg-sdk`
+- 运行阶段只包含 `fq-api` 和配置文件
+- signer 资源与 `sdk23` 由二进制自解包
 - 运行阶段使用 `gcr.io/distroless/cc-debian12:nonroot`
 
 本地启动：

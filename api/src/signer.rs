@@ -71,12 +71,13 @@ impl SignerClient {
 
 impl NativeSignerService {
     fn start(restart_cooldown_ms: u64) -> ServiceResult<Self> {
+        let runtime = NativeSignerConfig::from_env()
+            .map_err(|error| ServiceError::internal(format!("signer 运行时初始化失败: {error}")))?;
         let (tx, mut rx) = unbounded_channel();
         std::thread::Builder::new()
             .name("fq-native-signer".to_string())
             .spawn(move || {
-                let mut state =
-                    SignerThreadState::new(NativeSignerConfig::from_env(), restart_cooldown_ms);
+                let mut state = SignerThreadState::new(runtime, restart_cooldown_ms);
                 while let Some(command) = rx.blocking_recv() {
                     match command {
                         SignerCommand::Sign {

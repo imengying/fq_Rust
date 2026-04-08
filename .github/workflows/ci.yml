@@ -22,12 +22,3 @@ jobs:
           name: fq-api
           path: target/release/fq-api
           if-no-files-found: error
-      - name: Upload fq-runtime-assets artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: fq-runtime-assets
-          path: |
-            resources
-            third_party/rnidbg/android/sdk23
-            configs/config.yaml
-          if-no-files-found: error
