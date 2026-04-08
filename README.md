@@ -64,9 +64,10 @@
 
 - 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
-- 当前仓库内嵌的底层系统文件仍来自 `sdk23`
+- 当前二进制默认内嵌一套 Android 运行时文件：
+  本地存在 `local/rnidbg/sdk31` 时优先嵌入 `sdk31`，否则回退到仓库里的 `sdk23`
 - `fq.signer.android_sdk_api: 31` 只会改变上报的 SDK level，不等于真正切到 `sdk31`
-- 如果存在 `local/rnidbg/sdk31`，程序会默认优先使用它；没有再回退内嵌 `sdk23`
+- `RNIDBG_BASE_PATH` 只在你明确指定外部运行时目录时才需要
 
 ## 本地运行
 
@@ -107,10 +108,17 @@ tools/import_rnidbg_sdk.sh /path/to/mounted/system local/rnidbg/sdk31
 生成后运行：
 
 ```bash
-RNIDBG_BASE_PATH="$PWD/local/rnidbg/sdk31" ./target/release/fq-api
+cargo build --release --workspace
+./target/release/fq-api
 ```
 
-如果存在 `local/rnidbg/sdk31`，当前程序也会默认优先使用它；不设置 `RNIDBG_BASE_PATH` 也可以。
+如果构建时存在 `local/rnidbg/sdk31`，它会直接被嵌进 `fq-api`；不需要再额外配置 `RNIDBG_BASE_PATH`。
+
+如果你仍然想强制用某个外部目录覆盖内嵌版本，再显式指定：
+
+```bash
+RNIDBG_BASE_PATH="$PWD/local/rnidbg/sdk31" ./target/release/fq-api
+```
 
 脚本只会复制当前项目需要的最小文件集：
 

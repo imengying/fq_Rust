@@ -58,96 +58,7 @@ const EMBEDDED_RESOURCE_FILES: &[EmbeddedFile] = &[
     },
 ];
 
-const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
-    EmbeddedFile {
-        relative_path: "system/bin/ls",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/bin/ls"
-        )),
-        executable: true,
-    },
-    EmbeddedFile {
-        relative_path: "system/bin/sh",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/bin/sh"
-        )),
-        executable: true,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libc++.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libc++.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libc.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libc.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libcrypto.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libcrypto.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libdl.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libdl.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/liblog.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/liblog.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libm.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libm.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libssl.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libssl.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libstdc++.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libstdc++.so"
-        )),
-        executable: false,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/libz.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk23/system/lib64/libz.so"
-        )),
-        executable: false,
-    },
-];
+include!(concat!(env!("OUT_DIR"), "/embedded_sdk.rs"));
 
 #[derive(Debug, Clone)]
 pub struct NativeSignerConfig {
@@ -248,12 +159,6 @@ fn resolve_rnidbg_base_path(fallback: &Path) -> PathBuf {
     if let Some(path) = trim_to_null(std::env::var("RNIDBG_BASE_PATH").ok()) {
         return PathBuf::from(path);
     }
-
-    let local_sdk31 = PathBuf::from("local/rnidbg/sdk31");
-    if local_sdk31.join("system/lib64/libc.so").exists() {
-        return local_sdk31;
-    }
-
     fallback.to_path_buf()
 }
 
@@ -267,7 +172,7 @@ fn materialize_embedded_runtime() -> Result<EmbeddedRuntimeLayout> {
 }
 
 fn materialize_embedded_runtime_once() -> Result<EmbeddedRuntimeLayout> {
-    let root = std::env::temp_dir().join("fq-rust-embedded-runtime");
+    let root = std::env::temp_dir().join(format!("fq-rust-embedded-runtime-{}", EMBEDDED_SDK_NAME));
     let resource_root = root.join("resources");
     let sdk_root = root.join("sdk-runtime");
 
