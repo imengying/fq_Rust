@@ -735,12 +735,8 @@ name = "fq-signer-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
- "bytes",
  "emulator",
- "env_logger",
  "log",
- "once_cell",
 ]
 
 [[package]]
