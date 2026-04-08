@@ -53,7 +53,9 @@ impl<'a, T: Clone> HookListener<'a, T> for ArmLD64<'a, T> {
         info!("[libdl.so] link {}, old=0x{:X}", symbol_name, old);
         let svc = &mut emu.inner_mut().svc_memory;
         match symbol_name.as_str() {
-            "dl_iterate_phdr" => svc.register_svc(Box::new(DlIteratePhdr)) ,
+            "dl_iterate_phdr" => {
+                svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_zero))
+            }
             "dlerror" => svc.register_svc(Box::new(DlError(self.error.clone()))),
             "dlclose" => svc.register_svc(Box::new(DlClose(self.error.clone()))),
             "dlopen" | "android_dlopen_ext" => svc.register_svc(Box::new(DlOpen(self.error.clone()))),
