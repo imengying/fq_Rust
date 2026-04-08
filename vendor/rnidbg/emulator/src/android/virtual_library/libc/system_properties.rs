@@ -67,17 +67,20 @@ impl<T: Clone> Arm64Svc<T> for SystemPropertyGet {
         }
         match self.0.as_ref().unwrap()(&name) {
             Some(env) => {
-                if let Err(e) = backend.mem_write(value, env.as_bytes()) {
+                let mut buf = env.as_bytes().to_vec();
+                buf.push(0);
+                if let Err(e) = backend.mem_write(value, &buf) {
                     return FUCK(anyhow!("unable to write_mem when handle SystemPropGet: {}", e))
                 }
+                RET(env.len() as i64)
             }
             None => {
                 if let Err(e) = backend.mem_write(value, b"\0") {
                     return FUCK(anyhow!("unable to write_mem when handle SystemPropGet: {}", e))
                 }
+                RET(0)
             }
         }
-        RET(0)
     }
 }
 
