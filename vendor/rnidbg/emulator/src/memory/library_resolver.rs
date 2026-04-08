@@ -9,7 +9,7 @@ pub(crate) fn resolve_library_static<T: Clone>(emulator: &AndroidEmulator<T>, li
     }
     let base_path = emulator.inner_mut().base_path.as_str();
     let path = Path::new(&if base_path.is_empty() {
-        "./android/sdk23/system/lib64".to_string()
+        "./android/sdk31/system/lib64".to_string()
     } else {
         format!("{}/system/lib64", base_path)
     }).join(library_name);

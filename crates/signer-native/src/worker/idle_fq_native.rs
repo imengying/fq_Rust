@@ -88,7 +88,7 @@ impl IdleFqNative {
     ) -> Result<Self> {
         let resources = resolve_resources(apk_path, &resource_root)?;
         let rnidbg_base_path = rnidbg_base_path.unwrap_or_else(|| {
-            Path::new("vendor/rnidbg/android/sdk23")
+            Path::new("vendor/rnidbg/android/sdk31")
                 .to_string_lossy()
                 .to_string()
         });

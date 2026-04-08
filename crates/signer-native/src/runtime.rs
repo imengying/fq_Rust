@@ -58,7 +58,98 @@ const EMBEDDED_RESOURCE_FILES: &[EmbeddedFile] = &[
     },
 ];
 
-include!(concat!(env!("OUT_DIR"), "/embedded_sdk.rs"));
+const EMBEDDED_SDK_NAME: &str = "sdk31";
+
+const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
+    EmbeddedFile {
+        relative_path: "system/bin/ls",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/bin/ls"
+        )),
+        executable: true,
+    },
+    EmbeddedFile {
+        relative_path: "system/bin/sh",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/bin/sh"
+        )),
+        executable: true,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libc++.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libc++.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libc.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libc.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libcrypto.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libcrypto.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libdl.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libdl.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/liblog.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/liblog.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libm.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libm.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libssl.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libssl.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libstdc++.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libstdc++.so"
+        )),
+        executable: false,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/libz.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/libz.so"
+        )),
+        executable: false,
+    },
+];
 
 #[derive(Debug, Clone)]
 pub struct NativeSignerConfig {

@@ -7,7 +7,7 @@
 - Rust 负责对外 HTTP API、上游请求编排、缓存和内容解密
 - Rust 负责 `registerkey` 请求、缓存和解密 key 解析
 - Rust 原生 `rnidbg` signer 已内嵌进 `fq-api`
-- signer 资源和 `sdk23` 也已编进 `fq-api`，启动时自动解包到临时目录
+- signer 资源和 `sdk31` 已编进 `fq-api`，启动时自动解包到临时目录
 - Java signer、Maven 构建链、`unidbg` jar 回退路径已删除
 
 ## 代码结构
@@ -16,7 +16,7 @@
 - `crates/signer-native`: Rust 原生 signer 库
 - `assets/fq-signer`: 构建期嵌入的 signer 资源
 - `vendor/rnidbg`: vendored Rust 原生 Android 模拟运行时
-- `local/rnidbg/sdk31`: 本机私有导入的 Android 12 / API 31 运行时目录
+- `vendor/rnidbg/android/sdk31`: 项目默认内嵌的 Android 12 / API 31 运行时目录
 - `configs/config.yaml`: 默认配置
 - `.github/workflows/ci.yml`: 编译与测试
 
@@ -25,7 +25,6 @@
 - `crates/`: 所有 Rust 源码
 - `assets/`: 会被打进二进制的静态资源
 - `vendor/`: 提交到仓库的第三方源码
-- `local/`: 仅本机使用、不提交的私有运行时资源
 - `tools/`: 导入和维护脚本
 
 ## 对外接口
@@ -64,8 +63,7 @@
 
 - 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
-- 当前二进制默认内嵌一套 Android 运行时文件：
-  本地存在 `local/rnidbg/sdk31` 时优先嵌入 `sdk31`，否则回退到仓库里的 `sdk23`
+- 当前二进制默认直接内嵌仓库里的 `sdk31`
 - `fq.signer.android_sdk_api: 31` 只会改变上报的 SDK level，不等于真正切到 `sdk31`
 - `RNIDBG_BASE_PATH` 只在你明确指定外部运行时目录时才需要
 
@@ -95,14 +93,14 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 
 ## 生成 sdk31
 
-仓库当前内嵌的是 `sdk23`。如果你要尝试真 `sdk31`，推荐流程是：
+仓库当前默认内嵌的就是 `sdk31`。如果你要重新导入一套新的 `sdk31`，推荐流程是：
 
 1. 从官方 Android 12 / API 31 GSI 解压出 `system.img`
 2. 把 `system.img` 挂载成只读目录
 3. 运行脚本生成 rnidbg 目录：
 
 ```bash
-tools/import_rnidbg_sdk.sh /path/to/mounted/system local/rnidbg/sdk31
+tools/import_rnidbg_sdk.sh /path/to/mounted/system vendor/rnidbg/android/sdk31
 ```
 
 生成后运行：
@@ -112,12 +110,10 @@ cargo build --release --workspace
 ./target/release/fq-api
 ```
 
-如果构建时存在 `local/rnidbg/sdk31`，它会直接被嵌进 `fq-api`；不需要再额外配置 `RNIDBG_BASE_PATH`。
-
 如果你仍然想强制用某个外部目录覆盖内嵌版本，再显式指定：
 
 ```bash
-RNIDBG_BASE_PATH="$PWD/local/rnidbg/sdk31" ./target/release/fq-api
+RNIDBG_BASE_PATH="$PWD/vendor/rnidbg/android/sdk31" ./target/release/fq-api
 ```
 
 脚本只会复制当前项目需要的最小文件集：
@@ -140,7 +136,7 @@ RNIDBG_BASE_PATH="$PWD/local/rnidbg/sdk31" ./target/release/fq-api
 simg2img system.img system.raw.img
 mkdir -p /tmp/android12-system
 sudo mount -o loop,ro system.raw.img /tmp/android12-system
-tools/import_rnidbg_sdk.sh /tmp/android12-system local/rnidbg/sdk31
+tools/import_rnidbg_sdk.sh /tmp/android12-system vendor/rnidbg/android/sdk31
 sudo umount /tmp/android12-system
 ```
 
@@ -163,7 +159,7 @@ sudo umount /tmp/android12-system
    - 调用 `tools/import_rnidbg_sdk.sh`
    - 上传 `${sdk_name}.tar.gz` artifact
 
-这条 workflow 适合生成私有 `sdk31` artifact，不适合把 Google GSI 内容直接提交回仓库。
+这条 workflow 适合生成或更新项目里默认使用的 `sdk31` 目录。
 
 ## GitHub Actions
 
@@ -180,7 +176,7 @@ sudo umount /tmp/android12-system
 - 只构建 Rust
 - 运行阶段不再需要 Java
 - 运行阶段只包含 `fq-api` 和配置文件
-- signer 资源与 `sdk23` 由二进制自解包
+- signer 资源与 `sdk31` 由二进制自解包
 - 运行阶段使用 `gcr.io/distroless/cc-debian12:nonroot`
 
 本地启动：
