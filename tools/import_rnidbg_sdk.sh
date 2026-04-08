@@ -36,9 +36,9 @@ TMP_WORK="$(mktemp -d /tmp/fq-sdk-import.XXXXXX)"
 
 cleanup() {
   if [[ -d "${TMP_WORK}" ]]; then
-    find "${TMP_WORK}" -type d -path '*/mnt' | while read -r mountpoint; do
+    while read -r mountpoint; do
       sudo umount "${mountpoint}" >/dev/null 2>&1 || true
-    done
+    done < <(find "${TMP_WORK}" -type d -path '*/mnt' 2>/dev/null || true)
     rm -rf "${TMP_WORK}"
   fi
 }
