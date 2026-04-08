@@ -6,6 +6,7 @@ use std::cell::UnsafeCell;
 use std::cmp::max;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use anyhow::anyhow;
@@ -26,7 +27,12 @@ use crate::linux::symbol::{LinuxSymbol, ModuleSymbol, WEAK_BASE};
 use crate::memory::library_file::{LibraryFile, LibraryFileTrait};
 use crate::memory::svc_memory::HookListener;
 use crate::tool;
-use crate::tool::{align_addr, align_size, Alignment, get_segment_protection};
+use crate::tool::{align_addr, align_size, Alignment, get_segment_protection, UnicornArg};
+
+const IFUNC_ARG_HWCAP_FLAG: u64 = 1u64 << 62;
+const IFUNC_ARG_SIZE: u64 = 24;
+const IFUNC_ARG_HWCAP: u64 = 0;
+const IFUNC_ARG_HWCAP2: u64 = 0;
 
 pub(crate) struct ModuleMemRegion {
     pub virtual_address: u64,
@@ -445,7 +451,35 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                 }
                 R_AARCH64_IRELATIVE => {
                     let resolver = load_base + relocation.addend as u64;
-                    let resolved = emulator.e_func(resolver, vec![]).unwrap_or(0);
+                    let ifunc_arg = emulator.falloc(IFUNC_ARG_SIZE as usize, true)?;
+                    ifunc_arg.write_u64_with_offset(0, IFUNC_ARG_SIZE)?;
+                    ifunc_arg.write_u64_with_offset(8, IFUNC_ARG_HWCAP)?;
+                    ifunc_arg.write_u64_with_offset(16, IFUNC_ARG_HWCAP2)?;
+                    let resolved = match catch_unwind(AssertUnwindSafe(|| {
+                        emulator.e_func(
+                            resolver,
+                            vec![
+                                UnicornArg::U64(IFUNC_ARG_HWCAP | IFUNC_ARG_HWCAP_FLAG),
+                                UnicornArg::Ptr(ifunc_arg.addr),
+                            ],
+                        )
+                    })) {
+                        Ok(Some(value)) => value,
+                        Ok(None) => {
+                            warn!(
+                                "IFUNC resolver 0x{:X} returned null, falling back to resolver address",
+                                resolver
+                            );
+                            resolver
+                        }
+                        Err(_) => {
+                            warn!(
+                                "IFUNC resolver 0x{:X} panicked, falling back to resolver address",
+                                resolver
+                            );
+                            resolver
+                        }
+                    };
                     relocation_addr.write_u64(resolved)?;
                     warn!(
                         "Resolved R_AARCH64_IRELATIVE relocation at 0x{:X} via 0x{:X} -> 0x{:X}",

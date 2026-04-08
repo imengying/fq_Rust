@@ -47,8 +47,6 @@ use ffi::uc_handle;
 #[macro_use]
 pub mod unicorn_const;
 pub use unicorn_const::*;
-use bytes::BytesMut;
-use bytes::BufMut;
 use capstone::arch;
 use capstone::arch::BuildsCapstone;
 
