@@ -16,7 +16,7 @@ fn mem_hook_unmapped_unicorn<T: Clone>(hook_type: HookType, backend: &mut Unicor
     // map a zero-filled page so the read returns 0 and execution continues.
     // This is necessary because bionic libc's locale functions may dereference a NULL/small
     // locale_t pointer during init when TLS_TPREL relocations are approximated.
-    if matches!(hook_type, HookType::MEM_READ_UNMAPPED) && addr < 0x1000 {
+    if hook_type.contains(HookType::MEM_READ_UNMAPPED) && addr < 0x1000 {
         let _ = backend.mem_map(0, 0x1000, unicorn_engine::unicorn_const::Permission::READ);
         return true; // retry the read - it will now read 0
     }
