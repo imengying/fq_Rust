@@ -270,6 +270,10 @@ fn syscall<'a, T: Clone>(nr: Syscalls, backend: &Backend<'a, T>, emulator: &Andr
         Syscalls::__NR_getrandom => {
             syscalls::syscall_getrandom(backend, emulator);
         }
+        Syscalls::__NR_rt_sigaction => {
+            // Signal handling is not needed in the emulator; just return success.
+            backend.reg_write_i64(RegisterARM64::X0, 0).unwrap();
+        }
         _ => {
             info!("Unsupported syscall: {:?}", nr);
             backend.emu_stop(TaskStatus::X, emulator)
