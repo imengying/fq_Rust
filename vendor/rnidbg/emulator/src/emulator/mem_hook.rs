@@ -12,6 +12,14 @@ use crate::pointer::VMPointer;
 
 #[cfg(feature = "unicorn_backend")]
 fn mem_hook_unmapped_unicorn<T: Clone>(hook_type: HookType, backend: &mut Unicorn<T>, mem_type: MemType, addr: u64, size: usize, value: i64) -> bool {
+    // For reads from very low addresses (e.g. NULL pointer dereference from locale code),
+    // map a zero-filled page so the read returns 0 and execution continues.
+    // This is necessary because bionic libc's locale functions may dereference a NULL/small
+    // locale_t pointer during init when TLS_TPREL relocations are approximated.
+    if matches!(hook_type, HookType::MEM_READ_UNMAPPED) && addr < 0x1000 {
+        let _ = backend.mem_map(0, 0x1000, unicorn_engine::unicorn_const::Permission::READ);
+        return true; // retry the read - it will now read 0
+    }
     error!("{:?}::{:?}  memory failed: address=0x{:X}, size={}, value=0x{:X}, LR=0x{:X}", hook_type, mem_type, addr, size, value, backend.reg_read(RegisterARM64::LR).unwrap());
     backend.dump_context(addr, size);
     false
