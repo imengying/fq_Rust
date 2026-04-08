@@ -7,30 +7,22 @@ COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY api/Cargo.toml api/Cargo.toml
 COPY signer-native/Cargo.toml signer-native/Cargo.toml
+COPY resources resources
 COPY third_party/rnidbg third_party/rnidbg
 COPY api/src api/src
 COPY signer-native/src signer-native/src
 RUN cargo build --workspace --release
 
-FROM maven:3.9.13-eclipse-temurin-25 AS signer-builder
-
-WORKDIR /build/signer
-COPY signer/pom.xml pom.xml
-COPY signer/src src
-RUN mvn -B -DskipTests package
-
-FROM gcr.io/distroless/java25-debian13:nonroot
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 WORKDIR /app
 
-ENV UNIDBG_RESOURCE_ROOT=/app/unidbg
+ENV FQ_SIGNER_RESOURCE_ROOT=/app/resources
 ENV RNIDBG_BASE_PATH=/app/rnidbg-sdk
 
 COPY --from=rust-builder /app/target/release/fq-api /usr/local/bin/fq-api
-COPY --from=rust-builder /app/target/release/fq-signer-native /app/fq-signer-native
-COPY --from=signer-builder /build/signer/target/fq-signer.jar /app/fq-signer.jar
 COPY third_party/rnidbg/android/sdk23 /app/rnidbg-sdk
-COPY signer/src/main/resources /app/unidbg
+COPY resources /app/resources
 COPY configs/config.yaml /app/configs/config.yaml
 
 EXPOSE 9999

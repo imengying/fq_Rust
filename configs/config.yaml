@@ -9,9 +9,6 @@ fq:
     connect_timeout_ms: 15000
     read_timeout_ms: 30000
   signer:
-    backend: rust_native
-    command:
-      - /app/fq-signer-native
     restart_cooldown_ms: 2000
   cache:
     search_ttl_ms: 45000

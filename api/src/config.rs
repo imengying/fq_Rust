@@ -47,16 +47,7 @@ pub struct UpstreamConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SignerConfig {
-    pub backend: SignerBackendKind,
-    pub command: Vec<String>,
     pub restart_cooldown_ms: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SignerBackendKind {
-    JavaWorker,
-    RustNative,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -175,16 +166,8 @@ impl Default for UpstreamConfig {
 impl Default for SignerConfig {
     fn default() -> Self {
         Self {
-            backend: SignerBackendKind::RustNative,
-            command: default_signer_command(SignerBackendKind::RustNative),
             restart_cooldown_ms: 2_000,
         }
-    }
-}
-
-impl Default for SignerBackendKind {
-    fn default() -> Self {
-        Self::RustNative
     }
 }
 
@@ -269,7 +252,6 @@ impl AppConfig {
     pub fn load() -> Result<Self> {
         let mut config = load_from_disk()?;
         config.apply_env();
-        config.normalize_signer_command();
         config.inherit_device_pool_defaults();
         config.validate()?;
         Ok(config)
@@ -291,8 +273,6 @@ impl AppConfig {
             &mut self.fq.upstream.read_timeout_ms,
             "FQRS_UPSTREAM_READ_TIMEOUT_MS",
         );
-        set_command(&mut self.fq.signer.command, "FQRS_SIGNER_COMMAND");
-        set_signer_backend(&mut self.fq.signer.backend, "FQRS_SIGNER_BACKEND");
         set_u64(
             &mut self.fq.signer.restart_cooldown_ms,
             "FQRS_SIGNER_RESTART_COOLDOWN_MS",
@@ -347,9 +327,6 @@ impl AppConfig {
         if self.server.port == 0 {
             return Err(anyhow!("server.port 不能为空"));
         }
-        if self.fq.signer.command.is_empty() {
-            return Err(anyhow!("fq.signer.command 不能为空"));
-        }
         if self.fq.cache.postgres_table.trim().is_empty() {
             return Err(anyhow!("fq.cache.postgres_table 不能为空"));
         }
@@ -373,25 +350,6 @@ impl AppConfig {
         self.fq.device_profile.inherit_missing_from(&bootstrap);
     }
 
-    fn normalize_signer_command(&mut self) {
-        let java_default = default_signer_command(SignerBackendKind::JavaWorker);
-        let rust_default = default_signer_command(SignerBackendKind::RustNative);
-
-        if self.fq.signer.command.is_empty() {
-            self.fq.signer.command = default_signer_command(self.fq.signer.backend.clone());
-            return;
-        }
-
-        match self.fq.signer.backend {
-            SignerBackendKind::JavaWorker if self.fq.signer.command == rust_default => {
-                self.fq.signer.command = java_default;
-            }
-            SignerBackendKind::RustNative if self.fq.signer.command == java_default => {
-                self.fq.signer.command = rust_default;
-            }
-            _ => {}
-        }
-    }
 }
 
 impl UpstreamConfig {
@@ -552,40 +510,5 @@ fn set_bool(target: &mut bool, key: &str) {
             "0" | "false" | "no" | "off" => *target = false,
             _ => {}
         }
-    }
-}
-
-fn set_signer_backend(target: &mut SignerBackendKind, key: &str) {
-    if let Ok(value) = env::var(key) {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "java_worker" | "java-worker" | "java" => *target = SignerBackendKind::JavaWorker,
-            "rust_native" | "rust-native" | "rust" => *target = SignerBackendKind::RustNative,
-            _ => {}
-        }
-    }
-}
-
-fn set_command(target: &mut Vec<String>, key: &str) {
-    if let Ok(value) = env::var(key) {
-        let parsed: Vec<String> = value
-            .split_whitespace()
-            .filter(|item| !item.trim().is_empty())
-            .map(ToString::to_string)
-            .collect();
-        if !parsed.is_empty() {
-            *target = parsed;
-        }
-    }
-}
-
-fn default_signer_command(backend: SignerBackendKind) -> Vec<String> {
-    match backend {
-        SignerBackendKind::JavaWorker => vec![
-            "java".to_string(),
-            "--enable-native-access=ALL-UNNAMED".to_string(),
-            "-jar".to_string(),
-            "/app/fq-signer.jar".to_string(),
-        ],
-        SignerBackendKind::RustNative => vec!["/app/fq-signer-native".to_string()],
     }
 }

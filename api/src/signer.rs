@@ -1,19 +1,19 @@
-use crate::config::{SignerBackendKind, SignerConfig};
+use crate::config::SignerConfig;
 use crate::fq::now_ms;
 use crate::models::{ServiceError, ServiceResult};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use fq_signer_native::{NativeSigner, NativeSignerConfig};
 use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task;
 use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct SignerClient {
-    backend: Arc<dyn SignerBackend>,
+    service: Arc<NativeSignerService>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,217 +21,158 @@ pub struct SignResult {
     pub headers: IndexMap<String, String>,
 }
 
-trait SignerBackend: Send + Sync {
-    fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult>;
-    fn restart_blocking(&self, reason: &str) -> ServiceResult<bool>;
+struct NativeSignerService {
+    tx: UnboundedSender<SignerCommand>,
+}
+
+enum SignerCommand {
+    Sign {
+        url: String,
+        headers_text: String,
+        reply: mpsc::Sender<ServiceResult<String>>,
+    },
+    Restart {
+        reason: String,
+        reply: mpsc::Sender<ServiceResult<bool>>,
+    },
+}
+
+struct SignerThreadState {
+    runtime: NativeSignerConfig,
+    signer: Option<NativeSigner>,
+    restart_cooldown_ms: u64,
+    last_restart_at_ms: i64,
 }
 
 impl SignerClient {
     pub fn new(config: SignerConfig) -> ServiceResult<Self> {
-        let backend: Arc<dyn SignerBackend> = match config.backend {
-            SignerBackendKind::JavaWorker => Arc::new(ProcessSignerBackend::new(
-                "java_worker",
-                config.command,
-                config.restart_cooldown_ms,
-            )?),
-            SignerBackendKind::RustNative => Arc::new(ProcessSignerBackend::new(
-                "rust_native",
-                config.command,
-                config.restart_cooldown_ms,
-            )?),
-        };
-        Ok(Self { backend })
+        Ok(Self {
+            service: Arc::new(NativeSignerService::start(config.restart_cooldown_ms)?),
+        })
     }
 
     pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
-        let backend = self.backend.clone();
+        let service = self.service.clone();
         let url = url.to_string();
         let headers = headers.clone();
-        task::spawn_blocking(move || {
-            backend.sign_blocking(&url, &headers)
-        })
-        .await
-        .map_err(|error| ServiceError::internal(format!("signer 请求执行失败: {error}")))?
+        task::spawn_blocking(move || service.sign_blocking(&url, &headers))
+            .await
+            .map_err(|error| ServiceError::internal(format!("signer 请求执行失败: {error}")))?
     }
 
     pub async fn restart(&self, reason: &str) -> ServiceResult<bool> {
-        let backend = self.backend.clone();
+        let service = self.service.clone();
         let reason = reason.to_string();
-        task::spawn_blocking(move || {
-            backend.restart_blocking(&reason)
-        })
-        .await
-        .map_err(|error| ServiceError::internal(format!("signer 重启执行失败: {error}")))?
+        task::spawn_blocking(move || service.restart_blocking(&reason))
+            .await
+            .map_err(|error| ServiceError::internal(format!("signer 重启执行失败: {error}")))?
     }
 }
 
-struct ProcessSignerBackend {
-    name: &'static str,
-    inner: Arc<Mutex<SignerProcess>>,
-}
+impl NativeSignerService {
+    fn start(restart_cooldown_ms: u64) -> ServiceResult<Self> {
+        let (tx, mut rx) = unbounded_channel();
+        std::thread::Builder::new()
+            .name("fq-native-signer".to_string())
+            .spawn(move || {
+                let mut state =
+                    SignerThreadState::new(NativeSignerConfig::from_env(), restart_cooldown_ms);
+                while let Some(command) = rx.blocking_recv() {
+                    match command {
+                        SignerCommand::Sign {
+                            url,
+                            headers_text,
+                            reply,
+                        } => {
+                            let _ = reply.send(state.sign(&url, &headers_text));
+                        }
+                        SignerCommand::Restart { reason, reply } => {
+                            let _ = reply.send(state.restart_if_allowed(&reason));
+                        }
+                    }
+                }
+            })
+            .map_err(|error| ServiceError::internal(format!("signer 线程启动失败: {error}")))?;
 
-impl ProcessSignerBackend {
-    fn new(
-        name: &'static str,
-        command: Vec<String>,
-        restart_cooldown_ms: u64,
-    ) -> ServiceResult<Self> {
-        let mut process = SignerProcess::new(command, restart_cooldown_ms);
-        process.ensure_started()?;
-        Ok(Self {
-            name,
-            inner: Arc::new(Mutex::new(process)),
-        })
+        Ok(Self { tx })
     }
-}
 
-impl SignerBackend for ProcessSignerBackend {
     fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
         let headers_text = build_signature_input_headers(headers);
-        let mut process = self
-            .inner
-            .lock()
-            .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(SignerCommand::Sign {
+                url: url.to_string(),
+                headers_text,
+                reply: reply_tx,
+            })
+            .map_err(|_| ServiceError::internal("signer 线程不可用"))?;
 
-        match process.sign(url, &headers_text) {
-            Ok(raw) => {
-                info!(
-                    "signer raw output: backend={}, len={}, {}",
-                    self.name,
-                    raw.len(),
-                    truncate(&raw, 800)
-                );
-                Ok(SignResult {
-                    headers: parse_signature_result(&raw)?,
-                })
-            }
-            Err(error) => {
-                if process.should_restart_after_sign_error(&error)
-                    && process.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
-                {
-                    let raw = process.sign(url, &headers_text)?;
-                    return Ok(SignResult {
-                        headers: parse_signature_result(&raw)?,
-                    });
-                }
-                Err(error)
-            }
-        }
+        let raw = reply_rx
+            .recv()
+            .map_err(|_| ServiceError::internal("signer 响应通道已关闭"))??;
+        info!("signer raw output: len={}, {}", raw.len(), truncate(&raw, 800));
+        Ok(SignResult {
+            headers: parse_signature_result(&raw)?,
+        })
     }
 
     fn restart_blocking(&self, reason: &str) -> ServiceResult<bool> {
-        let mut process = self
-            .inner
-            .lock()
-            .map_err(|_| ServiceError::internal("signer 进程锁异常"))?;
-        process.restart_if_allowed(reason)
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(SignerCommand::Restart {
+                reason: reason.to_string(),
+                reply: reply_tx,
+            })
+            .map_err(|_| ServiceError::internal("signer 线程不可用"))?;
+        reply_rx
+            .recv()
+            .map_err(|_| ServiceError::internal("signer 重启通道已关闭"))?
     }
 }
 
-struct SignerProcess {
-    command: Vec<String>,
-    restart_cooldown_ms: u64,
-    child: Option<Child>,
-    stdin: Option<ChildStdin>,
-    stdout: Option<BufReader<ChildStdout>>,
-    last_restart_at_ms: i64,
-}
-
-impl SignerProcess {
-    fn new(command: Vec<String>, restart_cooldown_ms: u64) -> Self {
+impl SignerThreadState {
+    fn new(runtime: NativeSignerConfig, restart_cooldown_ms: u64) -> Self {
         Self {
-            command,
+            runtime,
+            signer: None,
             restart_cooldown_ms,
-            child: None,
-            stdin: None,
-            stdout: None,
             last_restart_at_ms: 0,
         }
     }
 
     fn sign(&mut self, url: &str, headers_text: &str) -> ServiceResult<String> {
         self.ensure_started()?;
-        let payload = format!(
-            "sign\t{}\t{}\n",
-            encode_protocol_field(url),
-            encode_protocol_field(headers_text)
-        );
-
-        let write_result = {
-            let stdin = self
-                .stdin
-                .as_mut()
-                .ok_or_else(|| ServiceError::internal("signer stdin 不可用"))?;
-            stdin
-                .write_all(payload.as_bytes())
-                .and_then(|_| stdin.flush())
-        };
-        if let Err(error) = write_result {
-            self.reset_process();
-            return Err(ServiceError::internal(format!("signer 请求写入失败: {error}")));
-        }
-
-        let mut line = String::new();
-        let read_result = {
-            let stdout = self
-                .stdout
-                .as_mut()
-                .ok_or_else(|| ServiceError::internal("signer stdout 不可用"))?;
-            stdout.read_line(&mut line)
-        };
-        let read = match read_result {
-            Ok(value) => value,
+        match self.signer.as_mut().expect("signer initialized").sign(url, headers_text) {
+            Ok(raw) => Ok(raw),
             Err(error) => {
-                self.reset_process();
-                return Err(ServiceError::internal(format!("signer 响应读取失败: {error}")));
+                let initial_error =
+                    ServiceError::internal(format!("signer 请求失败: {error}"));
+                if self.should_restart_after_sign_error(&initial_error)
+                    && self.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
+                {
+                    self.ensure_started()?;
+                    return self
+                        .signer
+                        .as_mut()
+                        .expect("signer restarted")
+                        .sign(url, headers_text)
+                        .map_err(|retry_error| {
+                            ServiceError::internal(format!(
+                                "signer 请求失败: {retry_error}"
+                            ))
+                        });
+                }
+                Err(initial_error)
             }
-        };
-        if read == 0 {
-            self.reset_process();
-            return Err(ServiceError::internal("signer 已退出"));
         }
-
-        parse_sign_response(&line)
     }
 
     fn ensure_started(&mut self) -> ServiceResult<()> {
-        if let Some(child) = self.child.as_mut() {
-            if child
-                .try_wait()
-                .map_err(|error| ServiceError::internal(format!("signer 状态检查失败: {error}")))?
-                .is_none()
-            {
-                return Ok(());
-            }
-            self.reset_process();
+        if self.signer.is_none() {
+            self.signer = Some(self.create_signer()?);
         }
-
-        self.spawn_process()
-    }
-
-    fn spawn_process(&mut self) -> ServiceResult<()> {
-        let binary = self
-            .command
-            .first()
-            .ok_or_else(|| ServiceError::internal("fq.signer.command 不能为空"))?
-            .clone();
-        let mut command = Command::new(binary);
-        if self.command.len() > 1 {
-            command.args(&self.command[1..]);
-        }
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
-
-        let mut child = command
-            .spawn()
-            .map_err(|error| ServiceError::internal(format!("signer 启动失败: {error}")))?;
-        self.stdin = child.stdin.take();
-        self.stdout = child.stdout.take().map(BufReader::new);
-        self.child = Some(child);
         Ok(())
-    }
-
-    fn should_restart_after_sign_error(&self, error: &ServiceError) -> bool {
-        error.code == 1003 || error.code == -1
     }
 
     fn restart_if_allowed(&mut self, reason: &str) -> ServiceResult<bool> {
@@ -243,26 +184,19 @@ impl SignerProcess {
             return Ok(false);
         }
 
-        warn!("restarting signer process: reason={reason}");
-        self.reset_process();
-        self.spawn_process()?;
+        warn!("restarting native signer: reason={reason}");
+        self.signer = Some(self.create_signer()?);
         self.last_restart_at_ms = now;
         Ok(true)
     }
 
-    fn reset_process(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        self.stdin = None;
-        self.stdout = None;
+    fn should_restart_after_sign_error(&self, error: &ServiceError) -> bool {
+        error.code == 1003 || error.code == -1
     }
-}
 
-impl Drop for SignerProcess {
-    fn drop(&mut self) {
-        self.reset_process();
+    fn create_signer(&self) -> ServiceResult<NativeSigner> {
+        NativeSigner::new(self.runtime.clone())
+            .map_err(|error| ServiceError::internal(format!("signer 初始化失败: {error}")))
     }
 }
 
@@ -275,72 +209,6 @@ fn truncate(value: &str, max_len: usize) -> String {
             end -= 1;
         }
         format!("{}...", &value[..end])
-    }
-}
-
-fn encode_protocol_field(value: &str) -> String {
-    URL_SAFE_NO_PAD.encode(value.as_bytes())
-}
-
-fn decode_protocol_field(field: &str, name: &str) -> ServiceResult<String> {
-    let bytes = URL_SAFE_NO_PAD.decode(field).map_err(|error| {
-        ServiceError::internal(format!("signer {name} 字段解码失败: {error}"))
-    })?;
-    String::from_utf8(bytes)
-        .map_err(|error| ServiceError::internal(format!("signer {name} 字段不是合法 UTF-8: {error}")))
-}
-
-fn parse_sign_response(line: &str) -> ServiceResult<String> {
-    let trimmed = line.trim_end_matches(['\r', '\n']);
-    if trimmed.is_empty() {
-        return Err(ServiceError::internal("signer 返回空响应"));
-    }
-
-    let mut parts = trimmed.split('\t');
-    let status = parts
-        .next()
-        .ok_or_else(|| ServiceError::internal("signer 响应缺少状态字段"))?;
-
-    match status {
-        "ok" => {
-            let raw = parts
-                .next()
-                .ok_or_else(|| ServiceError::internal("signer 响应缺少签名字段"))?;
-            if parts.next().is_some() {
-                return Err(ServiceError::internal(format!(
-                    "signer ok 响应字段异常: raw={}",
-                    truncate(trimmed, 512)
-                )));
-            }
-            decode_protocol_field(raw, "raw")
-        }
-        "err" => {
-            let code = parts
-                .next()
-                .ok_or_else(|| ServiceError::internal("signer 错误响应缺少 code"))?;
-            let message = parts
-                .next()
-                .ok_or_else(|| ServiceError::internal("signer 错误响应缺少 message"))?;
-            if parts.next().is_some() {
-                return Err(ServiceError::internal(format!(
-                    "signer err 响应字段异常: raw={}",
-                    truncate(trimmed, 512)
-                )));
-            }
-
-            let code = code.parse::<i32>().map_err(|error| {
-                ServiceError::internal(format!(
-                    "signer 错误码解析失败: {error}; raw={}",
-                    truncate(trimmed, 512)
-                ))
-            })?;
-            let message = decode_protocol_field(message, "message")?;
-            Err(ServiceError::new(code, message))
-        }
-        _ => Err(ServiceError::internal(format!(
-            "signer 响应状态无效: raw={}",
-            truncate(trimmed, 512)
-        ))),
     }
 }
 
@@ -406,7 +274,6 @@ fn parse_signature_result(raw: &str) -> ServiceResult<IndexMap<String, String>> 
     Ok(remove_header_ignore_case(result, "X-Neptune"))
 }
 
-/// Matches Java's HEADER_COLON_PAIR = Pattern.compile("^[A-Za-z0-9-]{1,64}:\\s*.+$")
 static HEADER_COLON_PAIR: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[A-Za-z0-9-]{1,64}:\s*.+$").unwrap());
 
@@ -432,24 +299,4 @@ fn remove_header_ignore_case(
         .into_iter()
         .filter(|(key, _)| !key.eq_ignore_ascii_case(target))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{encode_protocol_field, parse_sign_response};
-
-    #[test]
-    fn parse_ok_response_decodes_base64_payload() {
-        let line = format!("ok\t{}\n", encode_protocol_field("a:1\r\nb:2"));
-        let raw = parse_sign_response(&line).expect("ok response should decode");
-        assert_eq!(raw, "a:1\r\nb:2");
-    }
-
-    #[test]
-    fn parse_error_response_returns_service_error() {
-        let line = format!("err\t1003\t{}\n", encode_protocol_field("signer unavailable"));
-        let error = parse_sign_response(&line).expect_err("err response should fail");
-        assert_eq!(error.code, 1003);
-        assert_eq!(error.message, "signer unavailable");
-    }
 }
