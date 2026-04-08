@@ -910,6 +910,7 @@ pub fn syscall_mkdirat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
 
 pub fn syscall_set_tid_address<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidEmulator<'a, T>) {
     let tidptr = ldr_u64!(backend, X0);
+    let tid = emulator.get_current_pid() as i32;
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         let from = emulator.find_caller_name();
@@ -921,10 +922,14 @@ pub fn syscall_set_tid_address<'a, T: Clone>(backend: &Backend<'a, T>, emulator:
         AbstractTask::MarshmallowThread(task) => {
             task.set_tid_ptr(VMPointer::new(tidptr, 0, backend.clone()));
         }
-        _ => panic!("set_tid_address not supported: task type")
+        _ => {
+            if tidptr != 0 {
+                backend.mem_write(tidptr, &tid.to_le_bytes()).unwrap();
+            }
+        }
     }
 
-    ret_i32!(backend, 0);
+    ret_i32!(backend, tid);
 }
 
 pub fn syscall_rt_sigprocmask<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
@@ -986,7 +991,13 @@ pub fn syscall_rt_sigprocmask<T: Clone>(backend: &Backend<T>, emulator: &Android
                 _ => panic!("rt_sigprocmask not supported: {}", how)
             }
         }
-        _ => panic!("set_tid_address not supported: task type")
+        _ => {
+            if oldset != 0 {
+                backend.mem_write(oldset, &0u64.to_le_bytes()).unwrap();
+            }
+            ret_i32!(backend, 0);
+            return;
+        }
     }
 
     throw_err!(backend, emulator, Errno::EINVAL);
