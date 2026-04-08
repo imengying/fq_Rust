@@ -97,15 +97,26 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
                 let _ = once_ptr.write_i32_with_offset(0, 1);
                 if let Some(module_cell) = emu.memory().find_module_by_address(init_routine) {
                     let module = unsafe { &*module_cell.get() };
-                    info!(
-                        "pthread_once init callback: once=0x{:X}, callback=0x{:X}, module={}, base=0x{:X}, size=0x{:X}",
-                        once_ptr_addr,
-                        init_routine,
-                        module.name,
-                        module.base,
-                        module.size
-                    );
-                    init_routine
+                    if module.name == "libc.so" {
+                        info!(
+                            "skip internal libc pthread_once callback: once=0x{:X}, callback=0x{:X}, base=0x{:X}, size=0x{:X}",
+                            once_ptr_addr,
+                            init_routine,
+                            module.base,
+                            module.size
+                        );
+                        0
+                    } else {
+                        info!(
+                            "pthread_once init callback: once=0x{:X}, callback=0x{:X}, module={}, base=0x{:X}, size=0x{:X}",
+                            once_ptr_addr,
+                            init_routine,
+                            module.name,
+                            module.base,
+                            module.size
+                        );
+                        init_routine
+                    }
                 } else {
                     info!(
                         "pthread_once init callback outside loaded modules: once=0x{:X}, callback=0x{:X}",
