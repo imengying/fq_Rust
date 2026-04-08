@@ -15,7 +15,7 @@
 - `crates/api`: Rust API 服务
 - `crates/signer-native`: Rust 原生 signer 库
 - `assets/fq-signer`: 构建期嵌入的 signer 资源
-- `vendor/rnidbg`: vendored Rust 原生 Android 模拟运行时
+- `vendor/rnidbg`: 裁剪后的 rnidbg 运行时最小子集
 - `vendor/rnidbg/android/sdk31`: 项目默认内嵌的 Android 12 / API 31 运行时目录
 - `configs/config.yaml`: 默认配置
 - `.github/workflows/ci.yml`: 编译与测试
@@ -26,6 +26,13 @@
 - `assets/`: 会被打进二进制的静态资源
 - `vendor/`: 提交到仓库的第三方源码
 - `tools/`: 导入和维护脚本
+
+当前 `vendor/rnidbg` 只保留项目实际会编译和运行到的部分：
+
+- `android/sdk31`
+- `emulator`
+- `sparse_list`
+- `unicorn`
 
 ## 对外接口
 
