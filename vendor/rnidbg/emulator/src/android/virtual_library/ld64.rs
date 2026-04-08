@@ -3,6 +3,7 @@ use std::mem;
 use anyhow::{anyhow, Error};
 use bytes::{Buf, BufMut, BytesMut};
 use log::{debug, error, info, warn};
+use crate::elf::abi::PT_PHDR;
 use crate::backend::RegisterARM64;
 use crate::emulator::{AndroidEmulator, POST_CALLBACK_SYSCALL_NUMBER, VMPointer};
 use crate::keystone;
@@ -145,7 +146,15 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
         let mut modules = modules.iter().map(|module_cell| {
             let module = unsafe { &mut *module_cell.get() };
             let elf_file = unsafe { &*module.elf_file.as_ref().unwrap().get() };
-            (module.path(emu), module.virtual_base, elf_file.ph_offset, elf_file.num_ph)
+            let dlpi_phdr = (0..elf_file.num_ph as usize)
+                .find_map(|index| {
+                    elf_file
+                        .get_program_header(index)
+                        .filter(|segment| segment.typ == PT_PHDR)
+                        .map(|segment| module.virtual_base + segment.virtual_address)
+                })
+                .unwrap_or(module.virtual_base + elf_file.ph_offset as u64);
+            (module.path(emu), module.virtual_base, dlpi_phdr, elf_file.num_ph)
         }).collect::<Vec<_>>();
 
         modules.push(("/apex/com.android.art/lib64/libart.so".to_string(), 0, 0, 0));
