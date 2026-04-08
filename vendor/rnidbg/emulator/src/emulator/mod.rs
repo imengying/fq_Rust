@@ -112,7 +112,7 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
                 dalvik: None,
                 context_task: None,
                 brk: 0,
-                base_path: std::env::var("BASE_PATH").unwrap_or("./android/sdk31".to_string()),
+                base_path: std::env::var("BASE_PATH").unwrap_or("./android/sdk23".to_string()),
             })),
             backend
         })

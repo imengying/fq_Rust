@@ -58,14 +58,14 @@ const EMBEDDED_RESOURCE_FILES: &[EmbeddedFile] = &[
     },
 ];
 
-const EMBEDDED_SDK_NAME: &str = "sdk31";
+const EMBEDDED_SDK_NAME: &str = "sdk23";
 
 const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
     EmbeddedFile {
         relative_path: "system/bin/ls",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/bin/ls"
+            "/../../vendor/rnidbg/android/sdk23/system/bin/ls"
         )),
         executable: true,
     },
@@ -73,23 +73,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/bin/sh",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/bin/sh"
-        )),
-        executable: true,
-    },
-    EmbeddedFile {
-        relative_path: "system/bin/linker64",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/bin/linker64"
-        )),
-        executable: true,
-    },
-    EmbeddedFile {
-        relative_path: "system/lib64/ld-android.so",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/ld-android.so"
+            "/../../vendor/rnidbg/android/sdk23/system/bin/sh"
         )),
         executable: true,
     },
@@ -97,7 +81,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libc++.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libc++.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libc++.so"
         )),
         executable: false,
     },
@@ -105,7 +89,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libc.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libc.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libc.so"
         )),
         executable: false,
     },
@@ -113,7 +97,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libcrypto.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libcrypto.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libcrypto.so"
         )),
         executable: false,
     },
@@ -121,7 +105,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libdl.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libdl.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libdl.so"
         )),
         executable: false,
     },
@@ -129,7 +113,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/liblog.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/liblog.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/liblog.so"
         )),
         executable: false,
     },
@@ -137,7 +121,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libm.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libm.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libm.so"
         )),
         executable: false,
     },
@@ -145,7 +129,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libssl.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libssl.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libssl.so"
         )),
         executable: false,
     },
@@ -153,7 +137,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libstdc++.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libstdc++.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libstdc++.so"
         )),
         executable: false,
     },
@@ -161,7 +145,7 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         relative_path: "system/lib64/libz.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/rnidbg/android/sdk31/system/lib64/libz.so"
+            "/../../vendor/rnidbg/android/sdk23/system/lib64/libz.so"
         )),
         executable: false,
     },

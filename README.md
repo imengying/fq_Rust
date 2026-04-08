@@ -7,7 +7,7 @@
 - Rust 负责对外 HTTP API、上游请求编排、缓存和内容解密
 - Rust 负责 `registerkey` 请求、缓存和解密 key 解析
 - Rust 原生 `rnidbg` signer 已内嵌进 `fq-api`
-- signer 资源和 `sdk31` 已编进 `fq-api`，启动时自动解包到临时目录
+- signer 资源和运行时已编进 `fq-api`，启动时自动解包到临时目录
 - Java signer、Maven 构建链、`unidbg` jar 回退路径已删除
 
 ## 代码结构
@@ -16,7 +16,7 @@
 - `crates/signer-native`: Rust 原生 signer 库
 - `assets/fq-signer`: 构建期嵌入的 signer 资源
 - `vendor/rnidbg`: 裁剪后的 rnidbg 运行时最小子集
-- `vendor/rnidbg/android/sdk31`: 项目默认内嵌的 Android 12 / API 31 运行时目录
+- `vendor/rnidbg/android/sdk23`: 项目默认内嵌的运行时目录
 - `configs/config.yaml`: 默认配置
 - `.github/workflows/ci.yml`: 编译与测试
 
@@ -29,7 +29,7 @@
 
 当前 `vendor/rnidbg` 只保留项目实际会编译和运行到的部分：
 
-- `android/sdk31`
+- `android/sdk23`
 - `emulator`
 - `sparse_list`
 - `unicorn`
@@ -72,8 +72,8 @@
 
 - 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
-- 当前二进制默认直接内嵌仓库里的 `sdk31`
-- `fq.signer.android_sdk_api: 31` 只会改变上报的 SDK level，不等于真正切到 `sdk31`
+- 当前二进制默认内嵌的是更接近原版 unidbg 行为的 `sdk23` 运行时
+- `fq.signer.android_sdk_api: 31` 会继续把对外语义伪装成 Android 31
 - `RNIDBG_BASE_PATH` 只在你明确指定外部运行时目录时才需要
 
 ## 本地运行
@@ -100,9 +100,9 @@ curl "http://127.0.0.1:9999/toc/7185502456775208503"
 curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 ```
 
-## 生成 sdk31
+## 实验导入外部运行时
 
-仓库当前默认内嵌的就是 `sdk31`。如果你要重新导入一套新的 `sdk31`，推荐流程是：
+仓库当前默认内嵌的是 `sdk23`。下面这套流程主要用于实验性导入外部运行时，例如从 Android 12 / API 31 GSI 提取一套 `sdk31` 目录；它不会自动替换主线默认底座。
 
 1. 从官方 Android 12 / API 31 GSI 解压出 `system.img`
 2. 把 `system.img` 挂载成只读目录
@@ -149,7 +149,7 @@ tools/import_rnidbg_sdk.sh /tmp/android12-system vendor/rnidbg/android/sdk31
 sudo umount /tmp/android12-system
 ```
 
-## GitHub Actions 生成 sdk31
+## GitHub Actions 生成外部运行时目录
 
 仓库还带了一个手动 workflow：
 
@@ -168,7 +168,7 @@ sudo umount /tmp/android12-system
    - 调用 `tools/import_rnidbg_sdk.sh`
    - 上传 `${sdk_name}.tar.gz` artifact
 
-这条 workflow 适合生成或更新项目里默认使用的 `sdk31` 目录。
+这条 workflow 适合生成实验用外部运行时目录；当前主线默认仍然使用 `sdk23` 底座。
 
 ## GitHub Actions
 
@@ -185,7 +185,7 @@ sudo umount /tmp/android12-system
 - 只构建 Rust
 - 运行阶段不再需要 Java
 - 运行阶段只包含 `fq-api` 和配置文件
-- signer 资源与 `sdk31` 由二进制自解包
+- signer 资源与运行时目录由二进制自解包
 - 运行阶段使用 `gcr.io/distroless/cc-debian12:nonroot`
 
 本地启动：

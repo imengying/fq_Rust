@@ -168,7 +168,7 @@ impl Default for SignerConfig {
     fn default() -> Self {
         Self {
             restart_cooldown_ms: 2_000,
-            android_sdk_api: 23,
+            android_sdk_api: 31,
         }
     }
 }
