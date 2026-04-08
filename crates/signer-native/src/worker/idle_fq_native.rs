@@ -37,6 +37,8 @@ const APP_VERSION_CODE: i32 = 68132;
 const SIGN_FUNCTION_OFFSET: u64 = 0x168c80;
 const ANDROID_TARGET_SDK: i64 = 31;
 const LOADER_SHARED_GLOBALS_SIZE: usize = 0x1000;
+const LOADER_TLS_DTOR_LIST_OFFSET: u64 = 0x418;
+const LOADER_TLS_DTOR_LIST_SIZE: usize = 0x100;
 
 const MS_METHOD_DATA_PATH: i32 = 65539;
 const MS_METHOD_BOOL_1: i32 = 33554433;
@@ -492,6 +494,12 @@ fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
     let loader_shared_globals = emulator
         .falloc(LOADER_SHARED_GLOBALS_SIZE, false)
         .expect("failed to allocate loader shared globals");
+    let loader_tls_dtor_list = emulator
+        .falloc(LOADER_TLS_DTOR_LIST_SIZE, false)
+        .expect("failed to allocate loader tls dtor list");
+    loader_shared_globals
+        .write_u64_with_offset(LOADER_TLS_DTOR_LIST_OFFSET, loader_tls_dtor_list.addr)
+        .expect("failed to initialize loader tls dtor list");
     LOADER_SHARED_GLOBALS_ADDR.store(loader_shared_globals.addr, Ordering::Relaxed);
 
     let svc = emulator.svc_memory_mut();
