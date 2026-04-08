@@ -34,6 +34,8 @@
 - `sparse_list`
 - `unicorn`
 
+其中 `unicorn` 也已经进一步裁成当前项目使用的 AArch64 构建子集，不再保留其它架构目标源码。
+
 ## 对外接口
 
 - `GET /search`
