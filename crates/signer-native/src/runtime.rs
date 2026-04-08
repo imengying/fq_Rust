@@ -78,6 +78,22 @@ const EMBEDDED_SDK_FILES: &[EmbeddedFile] = &[
         executable: true,
     },
     EmbeddedFile {
+        relative_path: "system/bin/linker64",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/bin/linker64"
+        )),
+        executable: true,
+    },
+    EmbeddedFile {
+        relative_path: "system/lib64/ld-android.so",
+        bytes: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/rnidbg/android/sdk31/system/lib64/ld-android.so"
+        )),
+        executable: true,
+    },
+    EmbeddedFile {
         relative_path: "system/lib64/libc++.so",
         bytes: include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
