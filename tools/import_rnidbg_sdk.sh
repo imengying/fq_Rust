@@ -73,7 +73,7 @@ copy_file() {
   for candidate in "$@"; do
     if [[ -e "${candidate}" ]]; then
       mkdir -p "$(dirname "${dest}")"
-      cp -a "${candidate}" "${dest}"
+      cp -aL "${candidate}" "${dest}"
       return 0
     fi
   done
@@ -82,7 +82,7 @@ copy_file() {
 
 find_apex_package() {
   local prefix="$1"
-  find "${ROOT_BASE}" -type f \( -name "${prefix}*.apex" -o -name "${prefix}*.capex" \) | head -n 1
+  find "${ROOT_BASE}" -type f \( -name "${prefix}*.apex" -o -name "${prefix}*.capex" \) 2>/dev/null | head -n 1
 }
 
 mount_apex_payload() {
@@ -136,7 +136,7 @@ copy_from_apex() {
   [[ -e "${source}" ]] || return 1
 
   mkdir -p "$(dirname "${dest}")"
-  cp -a "${source}" "${dest}"
+  cp -aL "${source}" "${dest}"
   return 0
 }
 
