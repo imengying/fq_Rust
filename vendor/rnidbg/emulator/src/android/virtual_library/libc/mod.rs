@@ -95,12 +95,25 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
             let state = once_ptr.read_i32_with_offset(0).unwrap_or(0);
             if state == 0 {
                 let _ = once_ptr.write_i32_with_offset(0, 1);
-                info!(
-                    "pthread_once init callback: once=0x{:X}, callback=0x{:X}",
-                    once_ptr_addr,
+                if let Some(module_cell) = emu.memory().find_module_by_address(init_routine) {
+                    let module = unsafe { &*module_cell.get() };
+                    info!(
+                        "pthread_once init callback: once=0x{:X}, callback=0x{:X}, module={}, base=0x{:X}, size=0x{:X}",
+                        once_ptr_addr,
+                        init_routine,
+                        module.name,
+                        module.base,
+                        module.size
+                    );
                     init_routine
-                );
-                init_routine
+                } else {
+                    info!(
+                        "pthread_once init callback outside loaded modules: once=0x{:X}, callback=0x{:X}",
+                        once_ptr_addr,
+                        init_routine
+                    );
+                    0
+                }
             } else {
                 0
             }
