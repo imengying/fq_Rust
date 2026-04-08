@@ -47,7 +47,10 @@ struct SignerThreadState {
 impl SignerClient {
     pub fn new(config: SignerConfig) -> ServiceResult<Self> {
         Ok(Self {
-            service: Arc::new(NativeSignerService::start(config.restart_cooldown_ms)?),
+            service: Arc::new(NativeSignerService::start(
+                config.restart_cooldown_ms,
+                config.android_sdk_api,
+            )?),
         })
     }
 
@@ -70,8 +73,8 @@ impl SignerClient {
 }
 
 impl NativeSignerService {
-    fn start(restart_cooldown_ms: u64) -> ServiceResult<Self> {
-        let runtime = NativeSignerConfig::from_env()
+    fn start(restart_cooldown_ms: u64, android_sdk_api: u32) -> ServiceResult<Self> {
+        let runtime = NativeSignerConfig::from_env(android_sdk_api)
             .map_err(|error| ServiceError::internal(format!("signer 运行时初始化失败: {error}")))?;
         let (tx, mut rx) = unbounded_channel();
         std::thread::Builder::new()

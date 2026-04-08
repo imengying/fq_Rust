@@ -84,6 +84,7 @@ impl IdleFqNative {
         apk_path: Option<String>,
         resource_root: String,
         rnidbg_base_path: Option<String>,
+        android_sdk_api: u32,
     ) -> Result<Self> {
         let resources = resolve_resources(apk_path, &resource_root)?;
         let rnidbg_base_path = rnidbg_base_path.unwrap_or_else(|| {
@@ -94,7 +95,7 @@ impl IdleFqNative {
         std::env::set_var("BASE_PATH", rnidbg_base_path);
 
         let mut emulator = AndroidEmulator::create_arm64(PID, PPID, PACKAGE_NAME, ());
-        register_libc_hooks(&mut emulator);
+        register_libc_hooks(&mut emulator, android_sdk_api);
         register_virtual_modules(&mut emulator);
         install_file_resolver(&mut emulator, &resources);
 
@@ -466,10 +467,10 @@ fn resolve_resources(apk_path: Option<String>, resource_root: &str) -> Result<Re
     })
 }
 
-fn register_libc_hooks(emulator: &mut AndroidEmulator<'static, ()>) {
+fn register_libc_hooks(emulator: &mut AndroidEmulator<'static, ()>, android_sdk_api: u32) {
     let mut libc = Libc::new();
-    libc.set_system_property_service(Rc::new(Box::new(|name| match name {
-        "ro.build.version.sdk" => Some("23".to_string()),
+    libc.set_system_property_service(Rc::new(Box::new(move |name| match name {
+        "ro.build.version.sdk" => Some(android_sdk_api.to_string()),
         "persist.sys.timezone" => Some("Asia/Shanghai".to_string()),
         "ro.product.name" | "ro.product.device" => Some("Sirius".to_string()),
         "ro.product.manufacturer" | "ro.product.brand" => Some("Xiaomi".to_string()),

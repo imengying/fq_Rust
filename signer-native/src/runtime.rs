@@ -155,10 +155,11 @@ pub struct NativeSignerConfig {
     pub apk_path: Option<String>,
     pub resource_root: String,
     pub rnidbg_base_path: Option<String>,
+    pub android_sdk_api: u32,
 }
 
 impl NativeSignerConfig {
-    pub fn from_env() -> Result<Self> {
+    pub fn from_env(android_sdk_api: u32) -> Result<Self> {
         let embedded = materialize_embedded_runtime()?;
         Ok(Self {
             verbose: std::env::var("UNIDBG_VERBOSE")
@@ -173,6 +174,7 @@ impl NativeSignerConfig {
                 trim_to_null(std::env::var("RNIDBG_BASE_PATH").ok())
                     .unwrap_or_else(|| embedded.sdk_root.to_string_lossy().to_string()),
             ),
+            android_sdk_api,
         })
     }
 }
@@ -217,6 +219,7 @@ fn create_idle_fq(config: &NativeSignerConfig) -> Result<IdleFqNative> {
         config.apk_path.clone(),
         config.resource_root.clone(),
         config.rnidbg_base_path.clone(),
+        config.android_sdk_api,
     )
 }
 
@@ -255,7 +258,7 @@ fn materialize_embedded_runtime() -> Result<EmbeddedRuntimeLayout> {
 fn materialize_embedded_runtime_once() -> Result<EmbeddedRuntimeLayout> {
     let root = std::env::temp_dir().join("fq-rust-embedded-runtime");
     let resource_root = root.join("resources");
-    let sdk_root = root.join("sdk23");
+    let sdk_root = root.join("sdk-runtime");
 
     write_embedded_files(&resource_root, EMBEDDED_RESOURCE_FILES)?;
     write_embedded_files(&sdk_root, EMBEDDED_SDK_FILES)?;

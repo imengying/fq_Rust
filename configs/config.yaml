@@ -10,6 +10,7 @@ fq:
     read_timeout_ms: 30000
   signer:
     restart_cooldown_ms: 2000
+    android_sdk_api: 31
   cache:
     search_ttl_ms: 45000
     directory_ttl_ms: 600000

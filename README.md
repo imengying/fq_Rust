@@ -37,6 +37,7 @@
 
 - `fq.upstream`: 番茄上游地址与超时
 - `fq.signer.restart_cooldown_ms`: 内嵌 signer 重建节流
+- `fq.signer.android_sdk_api`: 模拟上报给库的 Android SDK level
 - `fq.cache.postgres_url`: 可选 PostgreSQL 章节主缓存
 - `fq.prefetch`: 章节分桶预取
 - `fq.auto_heal`: 连续错误后的 registerkey 失效、设备轮换、signer 重启自愈
@@ -47,6 +48,7 @@
 
 - `FQRS_DB_URL`
 - `DB_URL`
+- `FQRS_SIGNER_ANDROID_SDK_API`
 - `FQ_SIGNER_RESOURCE_ROOT`
 - `RNIDBG_BASE_PATH`
 
@@ -54,6 +56,8 @@
 
 - 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
+- 当前仓库内嵌的底层系统文件仍来自 `sdk23`
+- `fq.signer.android_sdk_api: 31` 只会改变上报的 SDK level，不等于真正切到 `sdk31`
 
 ## 本地运行
 

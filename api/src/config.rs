@@ -48,6 +48,7 @@ pub struct UpstreamConfig {
 #[serde(default)]
 pub struct SignerConfig {
     pub restart_cooldown_ms: u64,
+    pub android_sdk_api: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -167,6 +168,7 @@ impl Default for SignerConfig {
     fn default() -> Self {
         Self {
             restart_cooldown_ms: 2_000,
+            android_sdk_api: 23,
         }
     }
 }
@@ -276,6 +278,10 @@ impl AppConfig {
         set_u64(
             &mut self.fq.signer.restart_cooldown_ms,
             "FQRS_SIGNER_RESTART_COOLDOWN_MS",
+        );
+        set_u32(
+            &mut self.fq.signer.android_sdk_api,
+            "FQRS_SIGNER_ANDROID_SDK_API",
         );
         set_u64(
             &mut self.fq.cache.book_ttl_ms,
@@ -490,6 +496,14 @@ fn set_u64(target: &mut u64, key: &str) {
 fn set_u16(target: &mut u16, key: &str) {
     if let Ok(value) = env::var(key) {
         if let Ok(parsed) = value.parse::<u16>() {
+            *target = parsed;
+        }
+    }
+}
+
+fn set_u32(target: &mut u32, key: &str) {
+    if let Ok(value) = env::var(key) {
+        if let Ok(parsed) = value.parse::<u32>() {
             *target = parsed;
         }
     }
