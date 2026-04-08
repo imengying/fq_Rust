@@ -95,14 +95,14 @@ jobs:
           }
           trap cleanup EXIT
 
-          tools/import_rnidbg_sdk.sh /tmp/fq-sdk-build/mnt "third_party/local-sdk/${SDK_NAME}"
+          tools/import_rnidbg_sdk.sh /tmp/fq-sdk-build/mnt "local/rnidbg/${SDK_NAME}"
 
       - name: Pack artifact
         env:
           SDK_NAME: ${{ inputs.sdk_name }}
         run: |
           set -euo pipefail
-          tar -C third_party/local-sdk -czf "/tmp/${SDK_NAME}.tar.gz" "${SDK_NAME}"
+          tar -C local/rnidbg -czf "/tmp/${SDK_NAME}.tar.gz" "${SDK_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

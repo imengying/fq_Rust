@@ -1,6 +1,6 @@
 [workspace]
-members = ["api", "signer-native"]
-exclude = ["third_party/rnidbg", "third_party/rnidbg/*"]
+members = ["crates/api", "crates/signer-native"]
+exclude = ["vendor/rnidbg", "vendor/rnidbg/*"]
 resolver = "2"
 
 [workspace.package]

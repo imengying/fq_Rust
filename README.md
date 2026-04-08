@@ -12,13 +12,21 @@
 
 ## 代码结构
 
-- `api`: Rust API 服务
-- `signer-native`: Rust 原生 signer 库
-- `resources`: 构建期嵌入的 signer 资源源码
-- `third_party/rnidbg`: Rust 原生 Android 模拟运行时
+- `crates/api`: Rust API 服务
+- `crates/signer-native`: Rust 原生 signer 库
+- `assets/fq-signer`: 构建期嵌入的 signer 资源
+- `vendor/rnidbg`: vendored Rust 原生 Android 模拟运行时
+- `local/rnidbg/sdk31`: 本机私有导入的 Android 12 / API 31 运行时目录
 - `configs/config.yaml`: 默认配置
 - `.github/workflows/ci.yml`: 编译与测试
-- `.github/workflows/docker-publish.yml`: Docker Hub 发布
+
+当前目录分层约定：
+
+- `crates/`: 所有 Rust 源码
+- `assets/`: 会被打进二进制的静态资源
+- `vendor/`: 提交到仓库的第三方源码
+- `local/`: 仅本机使用、不提交的私有运行时资源
+- `tools/`: 导入和维护脚本
 
 ## 对外接口
 
@@ -58,6 +66,7 @@
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
 - 当前仓库内嵌的底层系统文件仍来自 `sdk23`
 - `fq.signer.android_sdk_api: 31` 只会改变上报的 SDK level，不等于真正切到 `sdk31`
+- 如果存在 `local/rnidbg/sdk31`，程序会默认优先使用它；没有再回退内嵌 `sdk23`
 
 ## 本地运行
 
@@ -92,16 +101,16 @@ curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 3. 运行脚本生成 rnidbg 目录：
 
 ```bash
-tools/import_rnidbg_sdk.sh /path/to/mounted/system third_party/local-sdk/sdk31
+tools/import_rnidbg_sdk.sh /path/to/mounted/system local/rnidbg/sdk31
 ```
 
 生成后运行：
 
 ```bash
-RNIDBG_BASE_PATH="$PWD/third_party/local-sdk/sdk31" ./target/release/fq-api
+RNIDBG_BASE_PATH="$PWD/local/rnidbg/sdk31" ./target/release/fq-api
 ```
 
-如果存在 `third_party/local-sdk/sdk31`，当前程序也会默认优先使用它；不设置 `RNIDBG_BASE_PATH` 也可以。
+如果存在 `local/rnidbg/sdk31`，当前程序也会默认优先使用它；不设置 `RNIDBG_BASE_PATH` 也可以。
 
 脚本只会复制当前项目需要的最小文件集：
 
@@ -123,7 +132,7 @@ RNIDBG_BASE_PATH="$PWD/third_party/local-sdk/sdk31" ./target/release/fq-api
 simg2img system.img system.raw.img
 mkdir -p /tmp/android12-system
 sudo mount -o loop,ro system.raw.img /tmp/android12-system
-tools/import_rnidbg_sdk.sh /tmp/android12-system third_party/local-sdk/sdk31
+tools/import_rnidbg_sdk.sh /tmp/android12-system local/rnidbg/sdk31
 sudo umount /tmp/android12-system
 ```
 
@@ -176,10 +185,10 @@ docker compose up --build
 
 - [Dockerfile](/home/mengying/文档/code/fq_Rust/Dockerfile)
 - [docker-compose.yml](/home/mengying/文档/code/fq_Rust/docker-compose.yml)
-- [signer.rs](/home/mengying/文档/code/fq_Rust/api/src/signer.rs)
-- [lib.rs](/home/mengying/文档/code/fq_Rust/signer-native/src/lib.rs)
-- [runtime.rs](/home/mengying/文档/code/fq_Rust/signer-native/src/runtime.rs)
-- [idle_fq_native.rs](/home/mengying/文档/code/fq_Rust/signer-native/src/worker/idle_fq_native.rs)
+- [signer.rs](/home/mengying/文档/code/fq_Rust/crates/api/src/signer.rs)
+- [lib.rs](/home/mengying/文档/code/fq_Rust/crates/signer-native/src/lib.rs)
+- [runtime.rs](/home/mengying/文档/code/fq_Rust/crates/signer-native/src/runtime.rs)
+- [idle_fq_native.rs](/home/mengying/文档/code/fq_Rust/crates/signer-native/src/worker/idle_fq_native.rs)
 
 ## Docker Hub 发布
 

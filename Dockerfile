@@ -5,12 +5,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends cmake pkg-confi
 COPY .cargo .cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
-COPY api/Cargo.toml api/Cargo.toml
-COPY signer-native/Cargo.toml signer-native/Cargo.toml
-COPY resources resources
-COPY third_party/rnidbg third_party/rnidbg
-COPY api/src api/src
-COPY signer-native/src signer-native/src
+COPY crates/api/Cargo.toml crates/api/Cargo.toml
+COPY crates/signer-native/Cargo.toml crates/signer-native/Cargo.toml
+COPY assets/fq-signer assets/fq-signer
+COPY vendor/rnidbg vendor/rnidbg
+COPY crates/api/src crates/api/src
+COPY crates/signer-native/src crates/signer-native/src
 RUN cargo build --workspace --release
 
 FROM gcr.io/distroless/cc-debian12:nonroot

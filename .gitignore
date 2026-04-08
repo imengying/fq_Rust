@@ -3,12 +3,12 @@
 /.vscode
 /.DS_Store
 **/target
-!third_party/rnidbg/unicorn/qemu/target/
-!third_party/rnidbg/unicorn/qemu/target/**
+!vendor/rnidbg/unicorn/qemu/target/
+!vendor/rnidbg/unicorn/qemu/target/**
 **/*.log
 **/*.tmp
 **/.classpath
 **/.project
 **/.settings
 .codex
-/third_party/local-sdk
+/local

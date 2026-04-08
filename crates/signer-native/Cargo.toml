@@ -9,5 +9,5 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
-emulator = { path = "../third_party/rnidbg/emulator", default-features = false, features = ["unicorn_backend"] }
+emulator = { path = "../../vendor/rnidbg/emulator", default-features = false, features = ["unicorn_backend"] }
 log = "0.4"

@@ -7,8 +7,8 @@ Usage:
   tools/import_rnidbg_sdk.sh <mounted-system-dir> [output-dir]
 
 Examples:
-  tools/import_rnidbg_sdk.sh /mnt/android12_system third_party/local-sdk/sdk31
-  tools/import_rnidbg_sdk.sh /mnt/android12_system/system third_party/local-sdk/sdk31
+  tools/import_rnidbg_sdk.sh /mnt/android12_system local/rnidbg/sdk31
+  tools/import_rnidbg_sdk.sh /mnt/android12_system/system local/rnidbg/sdk31
 
 Input:
   <mounted-system-dir> can be either:
@@ -17,7 +17,7 @@ Input:
 
 Output:
   A rnidbg-compatible sdk directory, for example:
-    third_party/local-sdk/sdk31
+    local/rnidbg/sdk31
 
 Notes:
   - This script does not download or mount images for you.
@@ -31,7 +31,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 SRC_INPUT="${1:-}"
-DEST_DIR="${2:-third_party/local-sdk/sdk31}"
+DEST_DIR="${2:-local/rnidbg/sdk31}"
 TMP_WORK="$(mktemp -d /tmp/fq-sdk-import.XXXXXX)"
 
 cleanup() {
