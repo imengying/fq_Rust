@@ -161,6 +161,7 @@ pub struct NativeSignerConfig {
 impl NativeSignerConfig {
     pub fn from_env(android_sdk_api: u32) -> Result<Self> {
         let embedded = materialize_embedded_runtime()?;
+        let preferred_sdk_root = resolve_rnidbg_base_path(&embedded.sdk_root);
         Ok(Self {
             verbose: std::env::var("UNIDBG_VERBOSE")
                 .ok()
@@ -170,10 +171,7 @@ impl NativeSignerConfig {
                 .unwrap_or(false),
             apk_path: trim_to_null(std::env::var("UNIDBG_APK_PATH").ok()),
             resource_root: resolve_resource_root(),
-            rnidbg_base_path: Some(
-                trim_to_null(std::env::var("RNIDBG_BASE_PATH").ok())
-                    .unwrap_or_else(|| embedded.sdk_root.to_string_lossy().to_string()),
-            ),
+            rnidbg_base_path: Some(preferred_sdk_root.to_string_lossy().to_string()),
             android_sdk_api,
         })
     }
@@ -244,6 +242,19 @@ fn resolve_resource_root() -> String {
     materialize_embedded_runtime()
         .map(|layout| layout.resource_root.to_string_lossy().to_string())
         .unwrap_or_else(|_| std::env::temp_dir().join("fq-rust-embedded-runtime/resources").to_string_lossy().to_string())
+}
+
+fn resolve_rnidbg_base_path(fallback: &Path) -> PathBuf {
+    if let Some(path) = trim_to_null(std::env::var("RNIDBG_BASE_PATH").ok()) {
+        return PathBuf::from(path);
+    }
+
+    let local_sdk31 = PathBuf::from("third_party/local-sdk/sdk31");
+    if local_sdk31.join("system/lib64/libc.so").exists() {
+        return local_sdk31;
+    }
+
+    fallback.to_path_buf()
 }
 
 fn materialize_embedded_runtime() -> Result<EmbeddedRuntimeLayout> {

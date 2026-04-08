@@ -101,6 +101,8 @@ tools/import_rnidbg_sdk.sh /path/to/mounted/system third_party/local-sdk/sdk31
 RNIDBG_BASE_PATH="$PWD/third_party/local-sdk/sdk31" ./target/release/fq-api
 ```
 
+如果存在 `third_party/local-sdk/sdk31`，当前程序也会默认优先使用它；不设置 `RNIDBG_BASE_PATH` 也可以。
+
 脚本只会复制当前项目需要的最小文件集：
 
 - `system/bin/ls`
