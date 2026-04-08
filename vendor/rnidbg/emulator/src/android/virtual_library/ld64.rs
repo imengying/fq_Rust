@@ -21,7 +21,7 @@ struct DlAddr;
 struct DlSym;
 struct DlUnwindFindExidx;
 
-const DEFAULT_ANDROID_TARGET_SDK: i64 = 31;
+const DEFAULT_ANDROID_TARGET_SDK: i64 = 23;
 
 fn return_zero<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
     RET(0)

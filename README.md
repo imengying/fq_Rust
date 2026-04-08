@@ -73,7 +73,7 @@
 - 默认不需要配置任何资源路径
 - `UNIDBG_RESOURCE_ROOT` 仍可用，但只是 `FQ_SIGNER_RESOURCE_ROOT` 的旧名字兼容
 - 当前二进制默认内嵌的是更接近原版 unidbg 行为的 `sdk23` 运行时
-- `fq.signer.android_sdk_api: 31` 会继续把对外语义伪装成 Android 31
+- 当前默认 `fq.signer.android_sdk_api: 23`
 - `RNIDBG_BASE_PATH` 只在你明确指定外部运行时目录时才需要
 
 ## 本地运行
