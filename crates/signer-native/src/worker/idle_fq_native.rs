@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const BASE_PATH: &str = "com/dragon/read/oversea/gp";
 const DEFAULT_APK_RESOURCE_PATH: &str = "com/dragon/read/oversea/gp/apk/base.apk";
 const SO_METASEC_ML_PATH: &str = "com/dragon/read/oversea/gp/lib/libmetasec_ml.so";
 const SO_C_SHARE_PATH: &str = "com/dragon/read/oversea/gp/lib/libc++_shared.so";
@@ -66,8 +65,6 @@ pub struct IdleFqNative {
     loggable: bool,
     emulator: AndroidEmulator<'static, ()>,
     module_base: u64,
-    resources: Resources,
-    classes: CachedClasses,
 }
 
 struct Resources {
@@ -121,7 +118,6 @@ impl IdleFqNative {
         };
 
         vm.set_jni(Box::new(FqJni {
-            loggable,
             classes: classes.clone(),
             ms_cert_data: resources.ms_cert_data.clone(),
         }));
@@ -139,8 +135,6 @@ impl IdleFqNative {
             loggable,
             emulator,
             module_base: unsafe { &*module.get() }.base,
-            resources,
-            classes,
         })
     }
 
@@ -171,7 +165,6 @@ impl IdleFqNative {
 }
 
 struct FqJni {
-    loggable: bool,
     classes: CachedClasses,
     ms_cert_data: Vec<u8>,
 }
