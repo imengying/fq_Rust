@@ -228,6 +228,9 @@ fn syscall<'a, T: Clone>(nr: Syscalls, backend: &Backend<'a, T>, emulator: &Andr
         Syscalls::__NR_getuid => {
             syscalls::syscall_getuid(backend, emulator);
         }
+        Syscalls::__NR_gettid => {
+            syscalls::syscall_gettid(backend, emulator);
+        }
         Syscalls::__NR_clone => {
             syscalls::syscall_clone(backend, emulator);
         }

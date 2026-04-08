@@ -795,6 +795,14 @@ pub fn syscall_getpid<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator
     ret_i32!(backend, emulator.inner_mut().pid as i32);
 }
 
+pub fn syscall_gettid<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        println!("syscall gettid()");
+    }
+
+    ret_i32!(backend, emulator.get_current_pid() as i32);
+}
+
 pub fn syscall_getuid<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         println!("syscall getuid()");
