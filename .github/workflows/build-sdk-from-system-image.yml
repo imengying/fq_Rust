@@ -1,0 +1,112 @@
+name: Build rnidbg SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      system_image_url:
+        description: "官方 system.img 或包含 system.img 的 zip 下载地址"
+        required: true
+        type: string
+      sdk_name:
+        description: "输出目录名，例如 sdk31"
+        required: false
+        default: sdk31
+        type: string
+      image_entry:
+        description: "当输入是 zip 时，zip 内 system.img 的相对路径；留空则自动查找"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  build-sdk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y android-sdk-libsparse-utils unzip file
+
+      - name: Download input image
+        env:
+          SYSTEM_IMAGE_URL: ${{ inputs.system_image_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/fq-sdk-build
+          curl -fL "$SYSTEM_IMAGE_URL" -o /tmp/fq-sdk-build/input.bin
+
+      - name: Resolve system image
+        env:
+          IMAGE_ENTRY: ${{ inputs.image_entry }}
+        run: |
+          set -euo pipefail
+
+          INPUT=/tmp/fq-sdk-build/input.bin
+          RESOLVED=/tmp/fq-sdk-build/system.img
+
+          if file "$INPUT" | grep -qi 'Zip archive data'; then
+            mkdir -p /tmp/fq-sdk-build/unzip
+            unzip -q "$INPUT" -d /tmp/fq-sdk-build/unzip
+
+            if [[ -n "${IMAGE_ENTRY}" ]]; then
+              cp "/tmp/fq-sdk-build/unzip/${IMAGE_ENTRY}" "$RESOLVED"
+            else
+              FOUND="$(find /tmp/fq-sdk-build/unzip -type f -name 'system*.img' | head -n 1)"
+              [[ -n "$FOUND" ]] || {
+                echo "ERROR: zip 中未找到 system*.img" >&2
+                exit 1
+              }
+              cp "$FOUND" "$RESOLVED"
+            fi
+          else
+            cp "$INPUT" "$RESOLVED"
+          fi
+
+          echo "SYSTEM_IMAGE=$RESOLVED" >> "$GITHUB_ENV"
+
+      - name: Convert sparse image if needed
+        run: |
+          set -euo pipefail
+
+          RAW=/tmp/fq-sdk-build/system.raw.img
+          if file "$SYSTEM_IMAGE" | grep -qi 'Android sparse image'; then
+            simg2img "$SYSTEM_IMAGE" "$RAW"
+            echo "MOUNT_IMAGE=$RAW" >> "$GITHUB_ENV"
+          else
+            echo "MOUNT_IMAGE=$SYSTEM_IMAGE" >> "$GITHUB_ENV"
+          fi
+
+      - name: Mount and import sdk
+        env:
+          SDK_NAME: ${{ inputs.sdk_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/fq-sdk-build/mnt
+          sudo mount -o loop,ro "$MOUNT_IMAGE" /tmp/fq-sdk-build/mnt
+
+          cleanup() {
+            sudo umount /tmp/fq-sdk-build/mnt || true
+          }
+          trap cleanup EXIT
+
+          tools/import_rnidbg_sdk.sh /tmp/fq-sdk-build/mnt "third_party/local-sdk/${SDK_NAME}"
+
+      - name: Pack artifact
+        env:
+          SDK_NAME: ${{ inputs.sdk_name }}
+        run: |
+          set -euo pipefail
+          tar -C third_party/local-sdk -czf "/tmp/${SDK_NAME}.tar.gz" "${SDK_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.sdk_name }}
+          path: /tmp/${{ inputs.sdk_name }}.tar.gz
+          if-no-files-found: error

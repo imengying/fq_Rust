@@ -125,6 +125,27 @@ tools/import_rnidbg_sdk.sh /tmp/android12-system third_party/local-sdk/sdk31
 sudo umount /tmp/android12-system
 ```
 
+## GitHub Actions 生成 sdk31
+
+仓库还带了一个手动 workflow：
+
+- [build-sdk-from-system-image.yml](/home/mengying/文档/code/fq_Rust/.github/workflows/build-sdk-from-system-image.yml)
+
+用法：
+
+1. 在 GitHub Actions 页面手动运行 `Build rnidbg SDK`
+2. 填入 `system_image_url`
+3. 如果输入是 zip，必要时再填 `image_entry`
+4. workflow 会：
+   - 下载 system image
+   - 自动解 zip
+   - 自动把 sparse image 转成 raw
+   - loop 只读挂载
+   - 调用 `tools/import_rnidbg_sdk.sh`
+   - 上传 `${sdk_name}.tar.gz` artifact
+
+这条 workflow 适合生成私有 `sdk31` artifact，不适合把 Google GSI 内容直接提交回仓库。
+
 ## GitHub Actions
 
 主工作流是 `.github/workflows/ci.yml`：
