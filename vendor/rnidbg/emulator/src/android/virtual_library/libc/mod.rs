@@ -4,11 +4,11 @@
 
 use std::marker::PhantomData;
 use std::rc::Rc;
-use bytes::{BufMut, BytesMut};
 use log::info;
 use crate::backend::RegisterARM64;
 use crate::emulator::{AndroidEmulator, VMPointer};
-use crate::memory::svc_memory::{assemble_svc, Arm64Svc, HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory};
+use crate::memory::svc_memory::{Arm64Svc, HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory};
+use crate::keystone;
 
 pub(super) mod system_properties;
 mod memory;
@@ -53,24 +53,26 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
     }
 
     fn on_register(&self, svc: &mut SvcMemory<T>, number: u32) -> u64 {
-        let mut buf = BytesMut::new();
-        buf.put_u32_le(0xd10043ff); // sub sp, sp, #0x10
-        buf.put_u32_le(0xa9007bfd); // stp x29, x30, [sp]
-        buf.put_u32_le(assemble_svc(number));
-        buf.put_u32_le(0xf94003ed); // ldr x13, [sp]
-        buf.put_u32_le(0x910023ff); // add sp, sp, #0x8
-        buf.put_u32_le(0xf10001bf); // cmp x13, #0
-        buf.put_u32_le(0x54000060); // b.eq #0x24
-        buf.put_u32_le(0x10ffff9e); // adr lr, #-0xf
-        buf.put_u32_le(0xd61f01a0); // br x13
-        buf.put_u32_le(0xf94003e0); // ldr x0, [sp]
-        buf.put_u32_le(0x910023ff); // add sp, sp, #0x8
-        buf.put_u32_le(0xa9407bfd); // ldp x29, x30, [sp]
-        buf.put_u32_le(0x910043ff); // add sp, sp, #0x10
-        buf.put_u32_le(0xd65f03c0); // ret
-        let pointer = svc.allocate(buf.len(), "pthread_once");
+        let code = [
+            "sub sp, sp, #0x10",
+            "stp x29, x30, [sp]",
+            &format!("svc #0x{:x}", number),
+            "ldr x13, [sp]",
+            "add sp, sp, #0x8",
+            "cmp x13, #0",
+            "b.eq #0x8",
+            "blr x13",
+            "ldr x0, [sp]",
+            "add sp, sp, #0x8",
+            "ldp x29, x30, [sp]",
+            "add sp, sp, #0x10",
+            "ret",
+        ]
+        .join("\n");
+        let code = keystone::assemble_no_check(&code);
+        let pointer = svc.allocate(code.len(), "pthread_once");
         pointer
-            .write_bytes(buf.freeze())
+            .write_buf(code)
             .expect("try register pthread_once svc failed");
         pointer.addr
     }
