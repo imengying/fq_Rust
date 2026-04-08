@@ -165,6 +165,20 @@ copy_or_fail "sh" "bin/sh" \
   "${SYSTEM_ROOT}/bin/sh" \
   "${ROOT_BASE}/system/bin/sh"
 
+if ! copy_file "bin/linker64" \
+  "${SYSTEM_ROOT}/bin/linker64" \
+  "${ROOT_BASE}/system/bin/linker64" \
+  "${ROOT_BASE}/apex/com.android.runtime/bin/linker64" \
+  "${ROOT_BASE}/system/apex/com.android.runtime/bin/linker64"; then
+  copy_from_apex "bin/linker64" "com.android.runtime" "bin/linker64" || {
+    echo "ERROR: 缺少必需文件(linker64)" >&2
+    exit 1
+  }
+fi
+
+mkdir -p "${DEST_DIR}/system/lib64"
+cp -aL "${DEST_DIR}/system/bin/linker64" "${DEST_DIR}/system/lib64/ld-android.so"
+
 if ! copy_file "lib64/libc++.so" \
   "${SYSTEM_ROOT}/lib64/libc++.so" \
   "${ROOT_BASE}/system/lib64/libc++.so" \
@@ -264,7 +278,11 @@ if ! copy_file "lib64/libz.so" \
   }
 fi
 
-chmod 755 "${DEST_DIR}/system/bin/ls" "${DEST_DIR}/system/bin/sh"
+chmod 755 \
+  "${DEST_DIR}/system/bin/ls" \
+  "${DEST_DIR}/system/bin/sh" \
+  "${DEST_DIR}/system/bin/linker64" \
+  "${DEST_DIR}/system/lib64/ld-android.so"
 
 manifest="${DEST_DIR}/MANIFEST.sha256"
 (
