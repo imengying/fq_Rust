@@ -4,10 +4,11 @@
 
 use std::marker::PhantomData;
 use std::rc::Rc;
+use bytes::{BufMut, BytesMut};
 use log::info;
 use crate::backend::RegisterARM64;
 use crate::emulator::{AndroidEmulator, VMPointer};
-use crate::memory::svc_memory::{HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory};
+use crate::memory::svc_memory::{assemble_svc, Arm64Svc, HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory};
 
 pub(super) mod system_properties;
 mod memory;
@@ -20,6 +21,8 @@ pub struct Libc<'a, T> {
 
     pd: PhantomData<&'a T>,
 }
+
+struct PthreadOnceSvc;
 
 fn return_zero<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
     SvcCallResult::RET(0)
@@ -44,13 +47,64 @@ fn pthread_key_create_stub<T: Clone>(_: &str, emu: &AndroidEmulator<T>) -> SvcCa
     SvcCallResult::RET(0)
 }
 
-fn pthread_once_stub<T: Clone>(_: &str, emu: &AndroidEmulator<T>) -> SvcCallResult {
-    let once_ptr = emu.backend.reg_read(RegisterARM64::X0).unwrap_or(0);
-    if once_ptr != 0 {
-        let once_ptr = VMPointer::new(once_ptr, 0, emu.backend.clone());
-        let _ = once_ptr.write_i32_with_offset(0, 1);
+impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
+    fn name(&self) -> &str {
+        "pthread_once"
     }
-    SvcCallResult::RET(0)
+
+    fn on_register(&self, svc: &mut SvcMemory<T>, number: u32) -> u64 {
+        let mut buf = BytesMut::new();
+        buf.put_u32_le(0xd10043ff); // sub sp, sp, #0x10
+        buf.put_u32_le(0xa9007bfd); // stp x29, x30, [sp]
+        buf.put_u32_le(assemble_svc(number));
+        buf.put_u32_le(0xf94003ed); // ldr x13, [sp]
+        buf.put_u32_le(0x910023ff); // add sp, sp, #0x8
+        buf.put_u32_le(0xf10001bf); // cmp x13, #0
+        buf.put_u32_le(0x54000060); // b.eq #0x24
+        buf.put_u32_le(0x10ffff9e); // adr lr, #-0xf
+        buf.put_u32_le(0xd61f01a0); // br x13
+        buf.put_u32_le(0xf94003e0); // ldr x0, [sp]
+        buf.put_u32_le(0x910023ff); // add sp, sp, #0x8
+        buf.put_u32_le(0xa9407bfd); // ldp x29, x30, [sp]
+        buf.put_u32_le(0x910043ff); // add sp, sp, #0x10
+        buf.put_u32_le(0xd65f03c0); // ret
+        let pointer = svc.allocate(buf.len(), "pthread_once");
+        pointer
+            .write_bytes(buf.freeze())
+            .expect("try register pthread_once svc failed");
+        pointer.addr
+    }
+
+    fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
+        let once_ptr_addr = emu.backend.reg_read(RegisterARM64::X0).unwrap_or(0);
+        let init_routine = emu.backend.reg_read(RegisterARM64::X1).unwrap_or(0);
+
+        let ret_slot =
+            VMPointer::new(emu.backend.reg_read(RegisterARM64::SP).unwrap(), 0, emu.backend.clone())
+                .share_with_size(-8, 0);
+        let callback_slot = ret_slot.share_with_size(-8, 0);
+
+        ret_slot.write_u64(0).unwrap();
+
+        let callback = if once_ptr_addr == 0 || init_routine == 0 {
+            0
+        } else {
+            let once_ptr = VMPointer::new(once_ptr_addr, 0, emu.backend.clone());
+            let state = once_ptr.read_i32_with_offset(0).unwrap_or(0);
+            if state == 0 {
+                let _ = once_ptr.write_i32_with_offset(0, 1);
+                init_routine
+            } else {
+                0
+            }
+        };
+
+        callback_slot.write_u64(callback).unwrap();
+        emu.backend
+            .reg_write(RegisterARM64::SP, callback_slot.addr)
+            .unwrap();
+        SvcCallResult::RET(0)
+    }
 }
 
 impl<T: Clone> Libc<'_, T> {
@@ -122,7 +176,7 @@ impl<'a, T: Clone> HookListener<'a, T> for Libc<'a, T> {
             | "pthread_condattr_getclock" => {
                 svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_zero))
             }
-            "pthread_once" => svc.register_svc(SimpleArm64Svc::new("pthread_once", pthread_once_stub)),
+            "pthread_once" => svc.register_svc(Box::new(PthreadOnceSvc)),
             "strcmp" => svc.register_svc(Box::new(string::StrCmp)),
             "strncmp" => svc.register_svc(Box::new(string::StrNCmp)),
             "strcasecmp" => svc.register_svc(Box::new(string::StrCaseCmp)),
