@@ -17,6 +17,7 @@ use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_APK_RESOURCE_PATH: &str = "com/dragon/read/oversea/gp/apk/base.apk";
@@ -35,6 +36,7 @@ const APP_UID: i32 = 10074;
 const APP_VERSION_CODE: i32 = 68132;
 const SIGN_FUNCTION_OFFSET: u64 = 0x168c80;
 const ANDROID_TARGET_SDK: i64 = 31;
+const LOADER_SHARED_GLOBALS_SIZE: usize = 0x1000;
 
 const MS_METHOD_DATA_PATH: i32 = 65539;
 const MS_METHOD_BOOL_1: i32 = 33554433;
@@ -46,6 +48,8 @@ const MS_METHOD_NOW_MS: i32 = 268435470;
 
 const PID: u32 = 2667;
 const PPID: u32 = 2427;
+
+static LOADER_SHARED_GLOBALS_ADDR: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 struct CachedClasses {
@@ -485,6 +489,11 @@ fn register_virtual_modules(emulator: &mut AndroidEmulator<'static, ()>) {
 }
 
 fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
+    let loader_shared_globals = emulator
+        .falloc(LOADER_SHARED_GLOBALS_SIZE, false)
+        .expect("failed to allocate loader shared globals");
+    LOADER_SHARED_GLOBALS_ADDR.store(loader_shared_globals.addr, Ordering::Relaxed);
+
     let svc = emulator.svc_memory_mut();
     let mut symbol = HashMap::new();
     symbol.insert(
@@ -516,7 +525,10 @@ fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
     );
     symbol.insert(
         "__loader_shared_globals".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("__loader_shared_globals", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_shared_globals",
+            ret_loader_shared_globals,
+        )),
     );
     symbol.insert(
         "__loader_add_thread_local_dtor".to_string(),
@@ -532,6 +544,59 @@ fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
             "__loader_android_get_exported_namespace",
             ret_zero,
         )),
+    );
+    symbol.insert(
+        "__loader_android_get_LD_LIBRARY_PATH".to_string(),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_android_get_LD_LIBRARY_PATH",
+            ret_zero,
+        )),
+    );
+    symbol.insert(
+        "__loader_dlopen".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dlopen", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dlclose".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dlclose", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dlsym".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dlsym", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dlvsym".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dlvsym", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dlerror".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dlerror", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dladdr".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dladdr", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_dl_iterate_phdr".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_dl_iterate_phdr", ret_zero)),
+    );
+    symbol.insert(
+        "__loader_android_dlopen_ext".to_string(),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_android_dlopen_ext",
+            ret_zero,
+        )),
+    );
+    symbol.insert(
+        "__loader_android_get_application_target_sdk_version".to_string(),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_android_get_application_target_sdk_version",
+            ret_target_sdk,
+        )),
+    );
+    symbol.insert(
+        "__loader_cfi_fail".to_string(),
+        svc.register_svc(SimpleArm64Svc::new("__loader_cfi_fail", ret_zero)),
     );
     let _ = emulator
         .memory()
@@ -616,6 +681,10 @@ fn ret_one<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
 
 fn ret_target_sdk<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
     SvcCallResult::RET(ANDROID_TARGET_SDK)
+}
+
+fn ret_loader_shared_globals<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -> SvcCallResult {
+    SvcCallResult::RET(LOADER_SHARED_GLOBALS_ADDR.load(Ordering::Relaxed) as i64)
 }
 
 fn install_file_resolver(emulator: &mut AndroidEmulator<'static, ()>, resources: &Resources) {
