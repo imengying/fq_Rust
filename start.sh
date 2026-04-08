@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+log() {
+  printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
+MODE="${1:-all}"
+
+case "${MODE}" in
+  deps|build|run|all)
+    if [[ $# -gt 0 ]]; then
+      shift
+    fi
+    ;;
+  *)
+    MODE="all"
+    ;;
+esac
+
+RUN_BIN="${PROJECT_DIR}/target/release/fq-api"
+CONFIG_PATH="${PROJECT_DIR}/configs/config.yaml"
+
+RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-stable}"
+CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+RUSTUP_DIST_SERVER="${RUSTUP_DIST_SERVER:-https://mirrors.aliyun.com/rustup}"
+RUSTUP_UPDATE_ROOT="${RUSTUP_UPDATE_ROOT:-https://mirrors.aliyun.com/rustup/rustup}"
+RUSTUP_INIT_URL="${RUSTUP_INIT_URL:-https://mirrors.aliyun.com/repo/rust/rustup-init.sh}"
+CARGO_REGISTRY_MIRROR="${CARGO_REGISTRY_MIRROR:-sparse+https://mirrors.aliyun.com/crates.io-index/}"
+CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}"
+CARGO_BUILD_LOCKED="${CARGO_BUILD_LOCKED:-false}"
+RUST_LOG="${RUST_LOG:-info}"
+
+if [[ ! -f "${PROJECT_DIR}/Cargo.toml" ]]; then
+  die "未找到 ${PROJECT_DIR}/Cargo.toml"
+fi
+
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  die "未找到配置文件 ${CONFIG_PATH}"
+fi
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=""
+else
+  command -v sudo >/dev/null 2>&1 || die "当前不是 root，且系统未安装 sudo"
+  SUDO="sudo"
+fi
+
+APT_UPDATED=0
+
+ensure_apt_packages() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    die "当前脚本只处理 Debian/Ubuntu 系统，请手动安装 Rust、cmake、pkg-config、build-essential、git、curl"
+  fi
+
+  if [[ "${APT_UPDATED}" -eq 0 ]]; then
+    log "更新 apt 索引"
+    ${SUDO} apt-get update
+    APT_UPDATED=1
+  fi
+
+  log "安装基础编译依赖"
+  ${SUDO} apt-get install -y \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    git \
+    ninja-build \
+    pkg-config \
+    perl \
+    tar \
+    xz-utils
+}
+
+ensure_rust() {
+  export CARGO_HOME RUSTUP_HOME
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export RUSTUP_DIST_SERVER
+  export RUSTUP_UPDATE_ROOT
+  export CARGO_NET_GIT_FETCH_WITH_CLI
+
+  if ! command -v rustup >/dev/null 2>&1; then
+    log "安装 rustup"
+    curl --proto '=https' --tlsv1.2 -sSf "${RUSTUP_INIT_URL}" | sh -s -- -y --profile minimal --default-toolchain none
+    export PATH="${CARGO_HOME}/bin:${PATH}"
+  fi
+
+  if ! rustup run "${RUST_TOOLCHAIN}" rustc --version >/dev/null 2>&1; then
+    log "安装 Rust toolchain ${RUST_TOOLCHAIN}"
+    rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal
+  fi
+
+  rustup default "${RUST_TOOLCHAIN}" >/dev/null
+  log "使用 Rust: $(rustup run "${RUST_TOOLCHAIN}" rustc --version)"
+}
+
+cargo_cmd() {
+  cargo \
+    --config 'source.crates-io.replace-with="aliyun"' \
+    --config "source.aliyun.registry=\"${CARGO_REGISTRY_MIRROR}\"" \
+    "$@"
+}
+
+install_deps() {
+  ensure_apt_packages
+  ensure_rust
+}
+
+build_project() {
+  cd "${PROJECT_DIR}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export RUSTUP_DIST_SERVER
+  export RUSTUP_UPDATE_ROOT
+  export CARGO_NET_GIT_FETCH_WITH_CLI
+
+  log "编译 fq-api"
+  if [[ "${CARGO_BUILD_LOCKED}" == "true" ]]; then
+    cargo_cmd build --release --workspace --locked
+  else
+    cargo_cmd build --release --workspace
+  fi
+
+  [[ -x "${RUN_BIN}" ]] || die "未生成 ${RUN_BIN}"
+}
+
+run_project() {
+  cd "${PROJECT_DIR}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export RUST_LOG
+  unset RNIDBG_BASE_PATH
+  unset FQ_SIGNER_RESOURCE_ROOT
+  unset UNIDBG_RESOURCE_ROOT
+
+  if [[ ! -x "${RUN_BIN}" ]]; then
+    die "未找到 ${RUN_BIN}，请先执行 ./start.sh build 或 ./start.sh all"
+  fi
+
+  log "启动 fq-api"
+  echo "PROJECT_DIR=${PROJECT_DIR}"
+  echo "CONFIG_PATH=${CONFIG_PATH}"
+  echo "RUST_LOG=${RUST_LOG}"
+  echo "RNIDBG_RUNTIME=<embedded sdk23>"
+  echo "SIGNER_ASSETS=<embedded assets>"
+
+  exec "${RUN_BIN}" "$@"
+}
+
+case "${MODE}" in
+  deps)
+    install_deps
+    ;;
+  build)
+    install_deps
+    build_project
+    ;;
+  run)
+    run_project "$@"
+    ;;
+  all)
+    install_deps
+    build_project
+    run_project "$@"
+    ;;
+  *)
+    die "不支持的模式: ${MODE}"
+    ;;
+esac
