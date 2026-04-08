@@ -83,6 +83,48 @@ curl "http://127.0.0.1:9999/toc/7185502456775208503"
 curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 ```
 
+## 生成 sdk31
+
+仓库当前内嵌的是 `sdk23`。如果你要尝试真 `sdk31`，推荐流程是：
+
+1. 从官方 Android 12 / API 31 GSI 解压出 `system.img`
+2. 把 `system.img` 挂载成只读目录
+3. 运行脚本生成 rnidbg 目录：
+
+```bash
+tools/import_rnidbg_sdk.sh /path/to/mounted/system third_party/local-sdk/sdk31
+```
+
+生成后运行：
+
+```bash
+RNIDBG_BASE_PATH="$PWD/third_party/local-sdk/sdk31" ./target/release/fq-api
+```
+
+脚本只会复制当前项目需要的最小文件集：
+
+- `system/bin/ls`
+- `system/bin/sh`
+- `system/lib64/libc++.so`
+- `system/lib64/libc.so`
+- `system/lib64/libcrypto.so`
+- `system/lib64/libdl.so`
+- `system/lib64/liblog.so`
+- `system/lib64/libm.so`
+- `system/lib64/libssl.so`
+- `system/lib64/libstdc++.so`
+- `system/lib64/libz.so`
+
+常见挂载方式：
+
+```bash
+simg2img system.img system.raw.img
+mkdir -p /tmp/android12-system
+sudo mount -o loop,ro system.raw.img /tmp/android12-system
+tools/import_rnidbg_sdk.sh /tmp/android12-system third_party/local-sdk/sdk31
+sudo umount /tmp/android12-system
+```
+
 ## GitHub Actions
 
 主工作流是 `.github/workflows/ci.yml`：
