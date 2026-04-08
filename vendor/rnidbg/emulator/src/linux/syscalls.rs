@@ -1028,6 +1028,16 @@ pub fn syscall_exit<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T
     emulator.emu_stop(TaskStatus::X).unwrap();
 }
 
+pub fn syscall_exit_group<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
+    let status = ldr_i32!(backend, X0);
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        println!("syscall exit_group(status={})", status);
+    }
+    // Some native libraries probe/trigger this in init paths; hard-stopping the emulator
+    // here may terminate the whole signing flow. Keep it as a soft no-op for now.
+    ret_i32!(backend, 0);
+}
+
 pub fn syscall_bionic_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidEmulator<'a, T>) {
     let flag = ldr_u32!(backend, X0);
     let child_stack = ldr_u64!(backend, X1);
@@ -1405,6 +1415,25 @@ pub fn syscall_connect<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     }
 
     unreachable!()
+}
+
+pub fn syscall_accept4<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
+    let sock_fd = ldr_i32!(backend, X0);
+    let _addr = ldr_u64!(backend, X1);
+    let _addr_len = ldr_u64!(backend, X2);
+    let _flags = ldr_i32!(backend, X3);
+
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        let from = emulator.find_caller_name();
+        println!(
+            "syscall accept4(sock_fd={}, addr=0x{:x}, addr_len=0x{:x}, flags={}) from {}",
+            sock_fd, _addr, _addr_len, _flags, from
+        );
+    }
+
+    // Server-side socket accept is not implemented in the emulator yet.
+    // Return a deterministic error instead of aborting the whole process.
+    throw_err!(backend, emulator, Errno::ENOTSOCK);
 }
 
 pub fn syscall_pipe2<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
