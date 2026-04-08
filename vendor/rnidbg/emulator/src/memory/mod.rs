@@ -174,6 +174,9 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
     pub(crate) fn resolve_symbols(&mut self, show_warning: bool, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<()> {
         for (name, module_cell) in &self.modules {
             let m = unsafe { &mut *module_cell.get() };
+            if m.elf_file.is_none() {
+                continue;
+            }
             let elf_file = unsafe { &*m.elf_file.as_ref().unwrap().get() };
 
             let mut resolved_symbol = Vec::new();

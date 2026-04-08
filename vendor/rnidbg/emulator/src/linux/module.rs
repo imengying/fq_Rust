@@ -200,7 +200,7 @@ impl<'a, T: Clone> LinuxModule<'a, T> {
             first, last, base, size
         );
 
-        let module = LinuxModule::new(
+        let mut module = LinuxModule::new(
             base,
             base,
             size,
@@ -216,6 +216,7 @@ impl<'a, T: Clone> LinuxModule<'a, T> {
             None,
             None,
         );
+        module.hook_map = symbol;
 
         module
     }
@@ -231,6 +232,8 @@ impl<'a, T: Clone> LinuxModule<'a, T> {
             return "/system/lib64/libm.so".to_string();
         } else if self.name == "libdl.so" {
             return "/system/lib64/libdl.so".to_string();
+        } else if self.name == "ld-android.so" {
+            return "/system/lib64/ld-android.so".to_string();
         } else if self.name == "libstdc++.so" {
             return "/system/lib64/libstdc++.so".to_string();
         } else if self.name == "libz.so" {
