@@ -13,7 +13,7 @@ use emulator::linux::fs::linux_file::LinuxFileIO;
 use emulator::memory::svc_memory::{SimpleArm64Svc, SvcCallResult};
 use emulator::AndroidEmulator;
 use emulator::UnicornArg;
-use log::info;
+use log::{info, warn};
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -762,8 +762,30 @@ fn patch_libmetasec_runtime(
     emulator: &AndroidEmulator<'static, ()>,
     module_base: u64,
 ) -> Result<()> {
+    if !should_patch_libmetasec_alloc_wrapper() {
+        warn!("skip libmetasec allocator wrapper patch on this host");
+        return Ok(());
+    }
     patch_libmetasec_alloc_wrapper(emulator, module_base)?;
     Ok(())
+}
+
+fn should_patch_libmetasec_alloc_wrapper() -> bool {
+    if std::env::var("FQ_FORCE_LIBMETASEC_ALLOC_PATCH")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return true;
+    }
+    if std::env::var("FQ_SKIP_LIBMETASEC_ALLOC_PATCH")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return false;
+    }
+    !cfg!(target_arch = "x86_64")
 }
 
 fn patch_libmetasec_alloc_wrapper(
