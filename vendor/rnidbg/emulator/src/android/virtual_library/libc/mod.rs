@@ -24,6 +24,9 @@ pub struct Libc<'a, T> {
 
 struct PthreadOnceSvc;
 
+const PTHREAD_ONCE_INIT: i32 = 0;
+const PTHREAD_ONCE_DONE: i32 = 2;
+
 fn return_zero<T: Clone>(_: &str, _: &AndroidEmulator<T>) -> SvcCallResult {
     SvcCallResult::RET(0)
 }
@@ -83,11 +86,11 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
         } else {
             let once_ptr = VMPointer::new(once_ptr_addr, 0, emu.backend.clone());
             let state = once_ptr.read_i32_with_offset(0).unwrap_or(0);
-            if state == 0 {
-                let _ = once_ptr.write_i32_with_offset(0, 1);
+            if state == PTHREAD_ONCE_INIT {
                 if let Some(module_cell) = emu.memory().find_module_by_address(init_routine) {
                     let module = unsafe { &*module_cell.get() };
                     if module.name == "libc.so" {
+                        let _ = once_ptr.write_i32_with_offset(0, PTHREAD_ONCE_DONE);
                         info!(
                             "skip internal libc pthread_once callback: once=0x{:X}, callback=0x{:X}, base=0x{:X}, size=0x{:X}",
                             once_ptr_addr,
@@ -97,6 +100,7 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
                         );
                         0
                     } else {
+                        let _ = once_ptr.write_i32_with_offset(0, PTHREAD_ONCE_DONE);
                         info!(
                             "pthread_once init callback: once=0x{:X}, callback=0x{:X}, module={}, base=0x{:X}, size=0x{:X}",
                             once_ptr_addr,
@@ -108,6 +112,7 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
                         init_routine
                     }
                 } else {
+                    let _ = once_ptr.write_i32_with_offset(0, PTHREAD_ONCE_DONE);
                     info!(
                         "pthread_once init callback outside loaded modules: once=0x{:X}, callback=0x{:X}",
                         once_ptr_addr,
