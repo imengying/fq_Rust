@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-    Ok(())
+    std::process::exit(0);
 }
 
 async fn search(

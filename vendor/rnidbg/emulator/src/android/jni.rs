@@ -236,6 +236,9 @@ impl<T: Clone> VaPrimitive<T> for DvmObject {
 impl<T: Clone> VaPrimitive<T> for Vec<u8> {
     fn get(list: &mut VaList<T>, dvm: &DalvikVM64<T>) -> Self {
         let object = list.get::<DvmObject>(dvm);
+        let Some(object) = object.resolve(dvm) else {
+            return Vec::new();
+        };
         match object {
             DvmObject::SimpleInstance(_) => unreachable!(),
             DvmObject::ObjectArray(_, _) => unreachable!(),
@@ -252,6 +255,9 @@ impl<T: Clone> VaPrimitive<T> for Vec<u8> {
 impl<T: Clone> VaPrimitive<T> for String {
     fn get(list: &mut VaList<T>, dvm: &DalvikVM64<T>) -> Self {
         let object = list.get::<DvmObject>(dvm);
+        let Some(object) = object.resolve(dvm) else {
+            return String::new();
+        };
         match object {
             DvmObject::SimpleInstance(_) => unreachable!(),
             DvmObject::ObjectArray(_, _) => unreachable!(),

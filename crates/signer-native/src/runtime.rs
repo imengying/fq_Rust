@@ -3,6 +3,7 @@ mod idle_fq_native;
 
 use anyhow::{anyhow, Result};
 use idle_fq_native::IdleFqNative;
+use std::mem::ManuallyDrop;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -181,18 +182,20 @@ impl NativeSignerConfig {
 
 pub struct NativeSigner {
     config: NativeSignerConfig,
-    inner: IdleFqNative,
+    inner: ManuallyDrop<IdleFqNative>,
 }
 
 impl NativeSigner {
     pub fn new(config: NativeSignerConfig) -> Result<Self> {
         let inner = create_idle_fq(&config)?;
-        Ok(Self { config, inner })
+        Ok(Self {
+            config,
+            inner: ManuallyDrop::new(inner),
+        })
     }
 
     pub fn sign(&mut self, url: &str, headers_text: &str) -> Result<String> {
-        let raw = self
-            .inner
+        let raw = (&mut *self.inner)
             .generate_signature(url, headers_text)?
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| anyhow!("signer unavailable"))?;
@@ -201,16 +204,14 @@ impl NativeSigner {
 
     pub fn restart(&mut self) -> Result<()> {
         let replacement = create_idle_fq(&self.config)?;
-        let mut previous = std::mem::replace(&mut self.inner, replacement);
-        previous.destroy();
+        let previous = std::mem::replace(&mut self.inner, ManuallyDrop::new(replacement));
+        std::mem::forget(previous);
         Ok(())
     }
 }
 
 impl Drop for NativeSigner {
-    fn drop(&mut self) {
-        self.inner.destroy();
-    }
+    fn drop(&mut self) {}
 }
 
 fn create_idle_fq(config: &NativeSignerConfig) -> Result<IdleFqNative> {

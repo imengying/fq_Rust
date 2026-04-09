@@ -176,10 +176,6 @@ impl IdleFqNative {
         }
         Ok(Some(text))
     }
-
-    pub fn destroy(&mut self) {
-        self.emulator.destroy();
-    }
 }
 
 struct FqJni {
@@ -256,11 +252,18 @@ impl Jni<()> for FqJni {
             return build_stack_trace_array(&self.classes).into();
         }
 
-        if class_name == "java/lang/Thread"
+        if class_name == "java/lang/String"
             && method.name == "getBytes"
             && method.signature == "(Ljava/lang/String;)[B"
         {
-            let value = args.get::<String>(vm);
+            let _charset = args.get::<String>(vm);
+            let value = instance
+                .and_then(|value| value.resolve(vm))
+                .and_then(|value| match value {
+                    DvmObject::String(value) => Some(value),
+                    _ => None,
+                })
+                .unwrap_or_default();
             return value.into_bytes().into();
         }
 
@@ -445,6 +448,34 @@ fn current_time_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_millis() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn signer_generates_signature_for_search_request() {
+        if std::env::var("FQ_SIGNER_TEST_CHILD").ok().as_deref() == Some("1") {
+            let config = crate::runtime::NativeSignerConfig::from_env(23).unwrap();
+            let mut signer = crate::runtime::NativeSigner::new(config).unwrap();
+            let raw = signer
+                .sign(
+                    "https://api5-normal-sinfonlinec.fqnovel.com/reading/bookapi/search/tab/v?query=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9",
+                    "accept\r\napplication/json; charset=utf-8,application/x-protobuf\r\ncookie\r\nstore-region=cn-zj; store-region-src=did; install_id=573270579220059\r\nuser-agent\r\ncom.dragon.read.oversea.gp/68132 (Linux; U; Android 13; zh_CN; Sirius; Build/V417IR;tt-ok/3.12.13.4-tiktok)\r\nx-ss-dp\r\n1967",
+                )
+                .unwrap();
+            assert!(!raw.trim().is_empty());
+            std::process::exit(0);
+        }
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("signer_generates_signature_for_search_request")
+            .arg("--exact")
+            .arg("--nocapture")
+            .env("FQ_SIGNER_TEST_CHILD", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "child signer smoke test failed: {status}");
+    }
 }
 
 fn resolve_resources(apk_path: Option<String>, resource_root: &str) -> Result<Resources> {

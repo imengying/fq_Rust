@@ -7,6 +7,7 @@ use crate::memory::svc_memory::SvcCallResult::{FUCK, RET};
 use crate::memory::svc_memory::{Arm64Svc, SvcCallResult};
 use anyhow::anyhow;
 use log::{debug, error};
+use std::mem::size_of;
 use std::rc::Rc;
 
 pub(super) struct SystemPropertyGet(Option<Rc<Box<dyn Fn(&str) -> Option<String>>>>);
@@ -151,6 +152,64 @@ impl<T: Clone> Arm64Svc<T> for SystemPropertyRead {
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        panic!("SystemPropertyRead not supported");
+        let backend = &emu.backend;
+        let Ok(prop_info_pointer) = backend.reg_read(RegisterARM64::X0) else {
+            return FUCK(anyhow!("unable to get prop_info_pointer"));
+        };
+        let Ok(name_pointer) = backend.reg_read(RegisterARM64::X1) else {
+            return FUCK(anyhow!("unable to get name_pointer"));
+        };
+        let Ok(value_pointer) = backend.reg_read(RegisterARM64::X2) else {
+            return FUCK(anyhow!("unable to get value_pointer"));
+        };
+
+        if prop_info_pointer == 0 {
+            return RET(0);
+        }
+
+        let Ok(prop_info) = backend.mem_read_v2::<PropInfo>(prop_info_pointer) else {
+            return FUCK(anyhow!(
+                "unable to read prop_info from pointer: 0x{:X}",
+                prop_info_pointer
+            ));
+        };
+        let name = c_buf_to_string(&prop_info.name);
+        let value = self
+            .0
+            .as_ref()
+            .and_then(|service| service(&name))
+            .unwrap_or_else(|| c_buf_to_string(&prop_info.value));
+
+        if option_env!("PRINT_SYSTEM_PROP_LOG") == Some("1") {
+            debug!(
+                "__system_property_read(0x{:X}, 0x{:X}, 0x{:X}) => {}={}",
+                prop_info_pointer, name_pointer, value_pointer, name, value
+            );
+        }
+
+        if name_pointer != 0 {
+            let mut buf = name.as_bytes().to_vec();
+            buf.push(0);
+            if let Err(e) = backend.mem_write(name_pointer, &buf) {
+                return FUCK(anyhow!("unable to write property name: {}", e));
+            }
+        }
+        if value_pointer != 0 {
+            let mut buf = value.as_bytes().to_vec();
+            buf.push(0);
+            if let Err(e) = backend.mem_write(value_pointer, &buf) {
+                return FUCK(anyhow!("unable to write property value: {}", e));
+            }
+        }
+
+        RET(value.len() as i64)
     }
+}
+
+fn c_buf_to_string(buffer: &[u8]) -> String {
+    let len = buffer
+        .iter()
+        .position(|&value| value == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf8_lossy(&buffer[..len]).into_owned()
 }

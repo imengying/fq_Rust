@@ -65,6 +65,7 @@
 - `FQRS_DB_URL`
 - `DB_URL`
 - `FQRS_SIGNER_ANDROID_SDK_API`
+- `FQRS_DEVICE_POOL_STARTUP_NAME`
 - `FQ_SIGNER_RESOURCE_ROOT`
 - `RNIDBG_BASE_PATH`
 
@@ -83,6 +84,14 @@
 
 ```bash
 cargo build --release --workspace
+```
+
+如果想一次性补齐依赖、跑测试和构建，也可以直接用脚本：
+
+```bash
+./start.sh deps
+./start.sh test
+./start.sh build
 ```
 
 3. 启动：

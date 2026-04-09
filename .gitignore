@@ -14,3 +14,5 @@
 /local
 start.sh
 .venv-test
+.cargo-home/
+.rustup-home/

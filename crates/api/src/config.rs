@@ -314,6 +314,10 @@ impl AppConfig {
             &mut self.fq.device_pool_probe_max_attempts,
             "FQRS_DEVICE_POOL_PROBE_MAX_ATTEMPTS",
         );
+        set_optional_string(
+            &mut self.fq.device_pool_startup_name,
+            "FQRS_DEVICE_POOL_STARTUP_NAME",
+        );
         set_bool(&mut self.fq.auto_heal.enabled, "FQRS_AUTO_HEAL_ENABLED");
         set_usize(
             &mut self.fq.auto_heal.error_threshold,

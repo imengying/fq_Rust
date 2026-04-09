@@ -33,6 +33,20 @@ impl DvmObject {
         DvmObject::SimpleInstance(class)
     }
 
+    pub fn resolve<T: Clone>(&self, dvm: &DalvikVM64<T>) -> Option<DvmObject> {
+        let mut current = self.clone();
+        for _ in 0..8 {
+            match current {
+                DvmObject::ObjectRef(0) => return None,
+                DvmObject::ObjectRef(ref_id) => {
+                    current = dvm.get_global_ref(ref_id)?.clone();
+                }
+                _ => return Some(current),
+            }
+        }
+        None
+    }
+
     pub fn get_class<T: Clone>(&self, dvm: &DalvikVM64<T>) -> Rc<DvmClass> {
         match self {
             DvmObject::SimpleInstance(class) => class.clone(),

@@ -2,7 +2,6 @@ use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::OFlag;
 use rand::Rng;
-use std::marker::PhantomData;
 
 pub struct URandom {
     pub path: String,
@@ -33,7 +32,7 @@ impl<T: Clone> FileIOTrait<T> for URandom {
     }
 
     fn pread(&mut self, buf: VMPointer<T>, count: usize, offset: usize) -> usize {
-        todo!()
+        self.read(buf, count)
     }
 
     fn write(&mut self, buf: &[u8]) -> i32 {
@@ -41,15 +40,15 @@ impl<T: Clone> FileIOTrait<T> for URandom {
     }
 
     fn lseek(&mut self, offset: i64, whence: i32) -> SeekResult {
-        todo!()
+        SeekResult::Ok(0)
     }
 
     fn path(&self) -> &str {
-        todo!()
+        self.path.as_str()
     }
 
     fn oflags(&self) -> OFlag {
-        todo!()
+        OFlag::from_bits_truncate(self.oflags)
     }
 
     fn st_mode(&self) -> StMode {
@@ -57,14 +56,14 @@ impl<T: Clone> FileIOTrait<T> for URandom {
     }
 
     fn uid(&self) -> i32 {
-        todo!()
+        self.uid
     }
 
     fn len(&self) -> usize {
-        todo!()
+        0
     }
 
     fn to_vec(&mut self) -> Vec<u8> {
-        todo!()
+        Vec::new()
     }
 }

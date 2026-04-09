@@ -17,7 +17,7 @@ PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
 MODE="${1:-all}"
 
 case "${MODE}" in
-  deps|build|run|all)
+  deps|build|test|run|all)
     if [[ $# -gt 0 ]]; then
       shift
     fi
@@ -101,6 +101,11 @@ ensure_rust() {
     rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal
   fi
 
+  if ! rustup component list --toolchain "${RUST_TOOLCHAIN}" | grep -q '^rustfmt-.*(installed)$'; then
+    log "安装 rustfmt 组件"
+    rustup component add rustfmt --toolchain "${RUST_TOOLCHAIN}"
+  fi
+
   rustup default "${RUST_TOOLCHAIN}" >/dev/null
   log "使用 Rust: $(rustup run "${RUST_TOOLCHAIN}" rustc --version)"
 }
@@ -134,6 +139,21 @@ build_project() {
   [[ -x "${RUN_BIN}" ]] || die "未生成 ${RUN_BIN}"
 }
 
+test_project() {
+  cd "${PROJECT_DIR}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export RUSTUP_DIST_SERVER
+  export RUSTUP_UPDATE_ROOT
+  export CARGO_NET_GIT_FETCH_WITH_CLI
+
+  log "运行测试"
+  if [[ "${CARGO_BUILD_LOCKED}" == "true" ]]; then
+    cargo_cmd test --workspace --locked
+  else
+    cargo_cmd test --workspace
+  fi
+}
+
 run_project() {
   cd "${PROJECT_DIR}"
   export PATH="${CARGO_HOME}/bin:${PATH}"
@@ -163,6 +183,10 @@ case "${MODE}" in
   build)
     install_deps
     build_project
+    ;;
+  test)
+    install_deps
+    test_project
     ;;
   run)
     run_project "$@"
