@@ -176,9 +176,8 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseTask<'a, T> {
         // Releasing the emulated task stack here can trigger late fetches into
         // unmapped memory under Unicorn, so keep the stack mapped for process life.
 
-        if let Some(context) = &self.context {
-            context.release();
-        }
+        // Context teardown can also crash on some Unicorn host builds during
+        // signer task cleanup, so keep the saved context allocated.
 
         if let Some(listener) = &self.destroy_listener {
             listener.on_destroy(emulator);
