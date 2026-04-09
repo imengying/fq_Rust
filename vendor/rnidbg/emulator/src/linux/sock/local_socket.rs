@@ -4,11 +4,13 @@ use crate::linux::file_system::{FileIO, FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::socket::Pf;
 use crate::linux::structs::OFlag;
 
-pub struct LocalSocket {}
+pub struct LocalSocket {
+    path: Option<String>,
+}
 
 impl LocalSocket {
     pub fn new() -> Self {
-        LocalSocket {}
+        LocalSocket { path: None }
     }
 }
 
@@ -27,50 +29,59 @@ impl<T: Clone> FileIOTrait<T> for LocalSocket {
 
         let path = emulator.backend.mem_read_c_string(addr.addr + 2).unwrap();
 
-        panic!("LocalSocket::connect: path={}", path);
+        if path.starts_with("/dev/socket/logd") {
+            self.path = Some(path);
+            return 0;
+        }
 
-        Errno::EACCES.as_i32()
+        emulator.set_errno(Errno::EACCES.as_i32()).unwrap();
+        return Errno::EACCES.as_i32();
+
     }
 
     fn close(&mut self) {}
 
     fn read(&mut self, buf: VMPointer<T>, count: usize) -> usize {
-        todo!()
+        0
     }
 
     fn pread(&mut self, buf: VMPointer<T>, count: usize, offset: usize) -> usize {
-        todo!()
+        0
     }
 
     fn write(&mut self, buf: &[u8]) -> i32 {
-        todo!()
+        if self.path.is_some() {
+            buf.len() as i32
+        } else {
+            -1
+        }
     }
 
     fn lseek(&mut self, offset: i64, whence: i32) -> SeekResult {
-        todo!()
+        SeekResult::UnknownError
     }
 
     fn path(&self) -> &str {
-        todo!()
+        self.path.as_deref().unwrap_or("/dev/socket/logdw")
     }
 
     fn oflags(&self) -> OFlag {
-        todo!()
+        OFlag::O_RDWR
     }
 
     fn st_mode(&self) -> StMode {
-        todo!()
+        StMode::S_IRUSR | StMode::S_IWUSR
     }
 
     fn uid(&self) -> i32 {
-        todo!()
+        0
     }
 
     fn len(&self) -> usize {
-        todo!()
+        0
     }
 
     fn to_vec(&mut self) -> Vec<u8> {
-        todo!()
+        Vec::new()
     }
 }
