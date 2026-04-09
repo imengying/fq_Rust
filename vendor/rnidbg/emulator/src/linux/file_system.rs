@@ -1,18 +1,18 @@
 #![allow(clippy::wrong_self_convention)]
 
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::emulator::AndroidEmulator;
+use crate::linux::fs::direction::Direction;
+use crate::linux::fs::linux_file::LinuxFileIO;
+use crate::linux::fs::ByteArrayFileIO;
+use crate::linux::sock::local_socket::LocalSocket;
+use crate::linux::structs::{OFlag, Stat64, Timespec};
+use crate::pointer::VMPointer;
 use anyhow::anyhow;
 use bitflags::bitflags;
 use bytes::Bytes;
 use sparse_list::SparseList;
-use crate::emulator::AndroidEmulator;
-use crate::linux::fs::ByteArrayFileIO;
-use crate::linux::fs::direction::Direction;
-use crate::linux::fs::linux_file::LinuxFileIO;
-use crate::linux::sock::local_socket::LocalSocket;
-use crate::linux::structs::{OFlag, Stat64, Timespec};
-use crate::pointer::VMPointer;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const SEEK_SET: i32 = 0;
 pub const SEEK_CUR: i32 = 1;
@@ -23,7 +23,7 @@ pub enum SeekResult {
     Ok(i64),
     WhenceError,
     OffsetError,
-    UnknownError
+    UnknownError,
 }
 
 pub const ST_DEV: i64 = 2054;
@@ -86,26 +86,27 @@ pub enum FileIO<T: Clone> {
     Direction(Direction),
     Dynamic(Box<dyn FileIOTrait<T>>),
     LocalSocket(LocalSocket),
-    Error(i32)
+    Error(i32),
 }
 
 pub struct FileIOEntry<T: Clone> {
     pub file: FileIO<T>,
     pub fd: i32,
     pub owner_pid: u32,
-    pub access_pid: Vec<u32>
+    pub access_pid: Vec<u32>,
 }
 
 pub struct AndroidFileSystem<T: Clone> {
     fd_map: SparseList<FileIO<T>>,
-    pub file_resolver: Option<Box<dyn Fn(&AndroidFileSystem<T>, &str, OFlag, i32) -> Option<FileIO<T>>>>
+    pub file_resolver:
+        Option<Box<dyn Fn(&AndroidFileSystem<T>, &str, OFlag, i32) -> Option<FileIO<T>>>>,
 }
 
 impl<T: Clone> AndroidFileSystem<T> {
     pub(crate) fn new() -> Self {
         AndroidFileSystem {
             fd_map: SparseList::new(),
-            file_resolver: None
+            file_resolver: None,
         }
     }
 
@@ -148,7 +149,10 @@ impl<T: Clone> AndroidFileSystem<T> {
     ///
     /// # Arguments
     /// * `resolver` - A function that takes a file system, path, flags, and mode as arguments and returns an option of FileIO
-    pub fn set_file_resolver(&mut self, resolver: Box<dyn Fn(&AndroidFileSystem<T>, &str, OFlag, i32) -> Option<FileIO<T>>>) {
+    pub fn set_file_resolver(
+        &mut self,
+        resolver: Box<dyn Fn(&AndroidFileSystem<T>, &str, OFlag, i32) -> Option<FileIO<T>>>,
+    ) {
         self.file_resolver = Some(resolver);
     }
 }
@@ -166,7 +170,12 @@ pub trait FileIOTrait<T: Clone> {
 
     fn path(&self) -> &str;
 
-    fn connect(&mut self, _addr: VMPointer<T>, _addr_len: usize, _emulator: &AndroidEmulator<T>) -> i32 {
+    fn connect(
+        &mut self,
+        _addr: VMPointer<T>,
+        _addr_len: usize,
+        _emulator: &AndroidEmulator<T>,
+    ) -> i32 {
         panic!("connect not implemented");
     }
 
@@ -178,18 +187,20 @@ pub trait FileIOTrait<T: Clone> {
         const STAT_SIZE: usize = size_of::<Stat64>();
         let mut buf = stat_pointer.read_bytes_with_len(STAT_SIZE).unwrap();
 
-        let stat: &mut Stat64 = unsafe {
-            &mut *(buf.as_mut_ptr() as *mut Stat64)
-        };
+        let stat: &mut Stat64 = unsafe { &mut *(buf.as_mut_ptr() as *mut Stat64) };
 
-        let (timestamp, timestamp_subsec_nanos) = if let Ok(duration_since_epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
-            (duration_since_epoch.as_secs(), duration_since_epoch.subsec_nanos())
-        } else {
-            panic!("SystemTime before UNIX EPOCH!");
-        };
+        let (timestamp, timestamp_subsec_nanos) =
+            if let Ok(duration_since_epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                (
+                    duration_since_epoch.as_secs(),
+                    duration_since_epoch.subsec_nanos(),
+                )
+            } else {
+                panic!("SystemTime before UNIX EPOCH!");
+            };
         let now_time_spec = Timespec {
             tv_sec: timestamp as i64,
-            tv_nsec: timestamp_subsec_nanos as i64
+            tv_nsec: timestamp_subsec_nanos as i64,
         };
 
         stat.st_dev = ST_DEV;
@@ -212,14 +223,18 @@ pub trait FileIOTrait<T: Clone> {
     fn fstat2(&self) -> Stat64 {
         let mut stat = Stat64::default();
 
-        let (timestamp, timestamp_subsec_nanos) = if let Ok(duration_since_epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
-            (duration_since_epoch.as_secs(), duration_since_epoch.subsec_nanos())
-        } else {
-            panic!("SystemTime before UNIX EPOCH!");
-        };
+        let (timestamp, timestamp_subsec_nanos) =
+            if let Ok(duration_since_epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                (
+                    duration_since_epoch.as_secs(),
+                    duration_since_epoch.subsec_nanos(),
+                )
+            } else {
+                panic!("SystemTime before UNIX EPOCH!");
+            };
         let now_time_spec = Timespec {
             tv_sec: timestamp as i64,
-            tv_nsec: timestamp_subsec_nanos as i64
+            tv_nsec: timestamp_subsec_nanos as i64,
         };
 
         stat.st_dev = ST_DEV;
@@ -241,9 +256,18 @@ pub trait FileIOTrait<T: Clone> {
 
     fn oflags(&self) -> OFlag;
 
-    fn mmap<'a>(&mut self, emu: &AndroidEmulator<'a, T>, addr: u64, aligned: i32, prot: u32, _offset: u32, _length: u64) -> anyhow::Result<u64> {
+    fn mmap<'a>(
+        &mut self,
+        emu: &AndroidEmulator<'a, T>,
+        addr: u64,
+        aligned: i32,
+        prot: u32,
+        _offset: u32,
+        _length: u64,
+    ) -> anyhow::Result<u64> {
         let data = self.to_vec();
-        emu.backend.mem_map(addr, aligned as usize, prot)
+        emu.backend
+            .mem_map(addr, aligned as usize, prot)
             .map_err(|e| anyhow!("FileIO failed to mmap: {:?}", e))?;
         let pointer = VMPointer::new(addr, 0, emu.backend.clone());
         pointer.write_bytes(Bytes::from(data))?;

@@ -1,17 +1,17 @@
-use std::cell::UnsafeCell;
-use std::ptr::read;
-use std::rc::Rc;
-use anyhow::anyhow;
-use bytes::{Buf, BytesMut};
-use log::error;
-use crate::elf::parser::{ElfFile, ElfParser};
-use crate::elf::abi::{*};
+use crate::elf::abi::*;
 use crate::elf::hash_tab::{ElfGnuHashTable, ElfHashTable, HashTable};
 use crate::elf::init_array::ElfInitArray;
-use crate::elf::memorized_object::{MemoizedObject};
+use crate::elf::memorized_object::MemoizedObject;
+use crate::elf::parser::{ElfFile, ElfParser};
 use crate::elf::relocation::ElfRelocation;
 use crate::elf::str_tab::ElfStringTable;
 use crate::elf::symbol_structure::{ElfSymbolStructure, SymbolLocator};
+use anyhow::anyhow;
+use bytes::{Buf, BytesMut};
+use log::error;
+use std::cell::UnsafeCell;
+use std::ptr::read;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct ElfDynamicStructure {
@@ -50,7 +50,12 @@ pub struct ElfDynamicStructure {
 }
 
 impl ElfDynamicStructure {
-    pub fn new(elf_file: Rc<UnsafeCell<ElfFile>>, parser: ElfParser, offset: usize, size: usize) -> Self {
+    pub fn new(
+        elf_file: Rc<UnsafeCell<ElfFile>>,
+        parser: ElfParser,
+        offset: usize,
+        size: usize,
+    ) -> Self {
         parser.seek(offset);
         let mut dynamic_structure = ElfDynamicStructure {
             dt_strtab_offset: 0,
@@ -89,52 +94,89 @@ impl ElfDynamicStructure {
         //let num_entries = size / if parser.object_size == 1 { 8 } else { 16 };
         let num_entries = size / 16;
 
-        let (dt_needed_list, so_name, init) = parse_dynamic_basic_info(&mut dynamic_structure, &parser, num_entries);
+        let (dt_needed_list, so_name, init) =
+            parse_dynamic_basic_info(&mut dynamic_structure, &parser, num_entries);
 
         let elf_file = unsafe { &*elf_file.get() };
         if dynamic_structure.dt_strtab_offset > 0 {
             let cloned_parser = parser.clone();
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.dt_strtab_offset as u64);
-            dynamic_structure.dt_string_table.set_compute_value(move || {
-                Ok(ElfStringTable::new(cloned_parser.clone(), offset as usize, dynamic_structure.dt_strtab_size as usize))
-            });
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.dt_strtab_offset as u64);
+            dynamic_structure
+                .dt_string_table
+                .set_compute_value(move || {
+                    Ok(ElfStringTable::new(
+                        cloned_parser.clone(),
+                        offset as usize,
+                        dynamic_structure.dt_strtab_size as usize,
+                    ))
+                });
         }
 
         let hash_tab = if dynamic_structure.hash_offset > 0 {
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.hash_offset as u64);
+            let offset =
+                elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.hash_offset as u64);
             let cloned_parser = parser.clone();
-            Some(HashTable::SysV(ElfHashTable::new(cloned_parser.clone(), offset as usize, 0)))
+            Some(HashTable::SysV(ElfHashTable::new(
+                cloned_parser.clone(),
+                offset as usize,
+                0,
+            )))
         } else if dynamic_structure.gnu_hash_offset > 0 {
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.gnu_hash_offset as u64);
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.gnu_hash_offset as u64);
             let cloned_parser = parser.clone();
-            Some(HashTable::Gnu(ElfGnuHashTable::new(cloned_parser.clone(), offset as usize)))
+            Some(HashTable::Gnu(ElfGnuHashTable::new(
+                cloned_parser.clone(),
+                offset as usize,
+            )))
         } else {
             None
         };
 
         if dynamic_structure.symbol_offset > 0 {
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.symbol_offset as u64);
+            let offset =
+                elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.symbol_offset as u64);
             let cloned_parser = parser.clone();
             let entry_size = dynamic_structure.symbol_entry_size;
             let dt_string_table = dynamic_structure.dt_string_table.clone();
-            dynamic_structure.symbol_structure.set_compute_value(move || {
-                Ok(ElfSymbolStructure::new(cloned_parser.clone(), offset as usize, entry_size, dt_string_table.clone(), hash_tab.clone()))
-            });
+            dynamic_structure
+                .symbol_structure
+                .set_compute_value(move || {
+                    Ok(ElfSymbolStructure::new(
+                        cloned_parser.clone(),
+                        offset as usize,
+                        entry_size,
+                        dt_string_table.clone(),
+                        hash_tab.clone(),
+                    ))
+                });
         }
 
         if dynamic_structure.rel_offset > 0 {
             let num_entries = dynamic_structure.rel_size / dynamic_structure.rel_entry_size;
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.rel_offset as u64) as usize;
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.rel_offset as u64)
+                as usize;
             for i in 0..num_entries {
-                let relocation_offset = offset + (i as usize * dynamic_structure.rel_entry_size as usize);
+                let relocation_offset =
+                    offset + (i as usize * dynamic_structure.rel_entry_size as usize);
                 let cloned_parser = parser.clone();
                 let entry_size = dynamic_structure.rel_entry_size;
                 let symbol_structure = dynamic_structure.symbol_structure.clone();
                 dynamic_structure.rel.push(MemoizedObject::new(move || {
-                    let symtab = SymbolLocator::SymbolStructure(symbol_structure.get_value()
-                        .expect("Failed to get symbol structure: rel_offset"));
+                    let symtab = SymbolLocator::SymbolStructure(
+                        symbol_structure
+                            .get_value()
+                            .expect("Failed to get symbol structure: rel_offset"),
+                    );
 
-                    Ok(ElfRelocation::new(cloned_parser.clone(), relocation_offset, entry_size, symtab))
+                    Ok(ElfRelocation::new(
+                        cloned_parser.clone(),
+                        relocation_offset,
+                        entry_size,
+                        symtab,
+                    ))
                 }));
             }
         }
@@ -144,16 +186,27 @@ impl ElfDynamicStructure {
                 dynamic_structure.rel_entry_size = 24;
             }
             let num_entries = dynamic_structure.plt_rel_size / dynamic_structure.rel_entry_size;
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.plt_rel_offset as u64) as usize;
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.plt_rel_offset as u64)
+                as usize;
             for i in 0..num_entries {
-                let relocation_offset = offset + (i as usize * dynamic_structure.rel_entry_size as usize);
+                let relocation_offset =
+                    offset + (i as usize * dynamic_structure.rel_entry_size as usize);
                 let cloned_parser = parser.clone();
                 let entry_size = dynamic_structure.rel_entry_size;
                 let symbol_structure = dynamic_structure.symbol_structure.clone();
                 dynamic_structure.plt_rel.push(MemoizedObject::new(move || {
-                    let symtab = SymbolLocator::SymbolStructure(symbol_structure.get_value()
-                        .expect("Failed to get symbol structure: plt_rel_offset"));
-                    Ok(ElfRelocation::new(cloned_parser.clone(), relocation_offset, entry_size, symtab))
+                    let symtab = SymbolLocator::SymbolStructure(
+                        symbol_structure
+                            .get_value()
+                            .expect("Failed to get symbol structure: plt_rel_offset"),
+                    );
+                    Ok(ElfRelocation::new(
+                        cloned_parser.clone(),
+                        relocation_offset,
+                        entry_size,
+                        symtab,
+                    ))
                 }));
             }
         }
@@ -165,18 +218,28 @@ impl ElfDynamicStructure {
         }
 
         if dynamic_structure.init_array_offset > 0 {
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.init_array_offset as u64);
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.init_array_offset as u64);
             let cloned_parser = parser.clone();
             dynamic_structure.init_array.set_compute_value(move || {
-                Ok(ElfInitArray::new(cloned_parser.clone(), offset as usize, dynamic_structure.init_array_size as usize))
+                Ok(ElfInitArray::new(
+                    cloned_parser.clone(),
+                    offset as usize,
+                    dynamic_structure.init_array_size as usize,
+                ))
             });
         }
 
         if dynamic_structure.preinit_array_offset > 0 {
-            let offset = elf_file.virtual_memory_addr_to_file_offset(dynamic_structure.preinit_array_offset as u64);
+            let offset = elf_file
+                .virtual_memory_addr_to_file_offset(dynamic_structure.preinit_array_offset as u64);
             let cloned_parser = parser.clone();
             dynamic_structure.pre_init_array.set_compute_value(move || {
-                Ok(ElfInitArray::new(cloned_parser.clone(), offset as usize, dynamic_structure.preinit_array_size as usize))
+                Ok(ElfInitArray::new(
+                    cloned_parser.clone(),
+                    offset as usize,
+                    dynamic_structure.preinit_array_size as usize,
+                ))
             });
         }
 
@@ -211,15 +274,19 @@ impl ElfDynamicStructure {
         }
 
         for rel in self.rel.iter() {
-            result.push(rel.get_value()
-                .map_err(|e| error!("Failed to get relocation: {:?}", e))
-                .expect("Failed to get relocation: rel"));
+            result.push(
+                rel.get_value()
+                    .map_err(|e| error!("Failed to get relocation: {:?}", e))
+                    .expect("Failed to get relocation: rel"),
+            );
         }
 
         for rel in self.plt_rel.iter() {
-            result.push(rel.get_value()
-                .map_err(|e| error!("Failed to get relocation: {:?}", e))
-                .expect("Failed to get relocation: plt_rel"));
+            result.push(
+                rel.get_value()
+                    .map_err(|e| error!("Failed to get relocation: {:?}", e))
+                    .expect("Failed to get relocation: plt_rel"),
+            );
         }
 
         result
@@ -230,9 +297,8 @@ fn parse_android_rel(
     elf_file: &ElfFile,
     dynamic_structure: &mut ElfDynamicStructure,
     parser: &ElfParser,
-    rela: bool
-)
-{
+    rela: bool,
+) {
     let rel_size = if rela {
         dynamic_structure.android_rela_size
     } else {
@@ -312,8 +378,12 @@ fn parse_android_rel(
             relocation_group_index_ += 1;
             relocation_index_ += 1;
 
-            let symtab = SymbolLocator::SymbolStructure(dynamic_structure.symbol_structure.get_value()
-                .expect("Failed to get symbol structure: android_rel_offset"));
+            let symtab = SymbolLocator::SymbolStructure(
+                dynamic_structure
+                    .symbol_structure
+                    .get_value()
+                    .expect("Failed to get symbol structure: android_rel_offset"),
+            );
             dynamic_structure.android_rel.push(ElfRelocation {
                 //object_size: parser.object_size,
                 symtab,
@@ -326,7 +396,11 @@ fn parse_android_rel(
     }
 }
 
-fn parse_dynamic_basic_info(dynamic_structure: &mut ElfDynamicStructure, parser: &ElfParser, num_entries: usize) -> (Vec<u32>, i32, i32) {
+fn parse_dynamic_basic_info(
+    dynamic_structure: &mut ElfDynamicStructure,
+    parser: &ElfParser,
+    num_entries: usize,
+) -> (Vec<u32>, i32, i32) {
     let mut dt_needed_list = vec![0u32; 0];
 
     let mut so_name = 0i32;
@@ -336,9 +410,7 @@ fn parse_dynamic_basic_info(dynamic_structure: &mut ElfDynamicStructure, parser:
         let tag = parser.read_int_or_long();
         let val = parser.read_int_or_long();
         match tag {
-            DT_NULL => {
-                break
-            }
+            DT_NULL => break,
             DT_NEEDED => {
                 dt_needed_list.push(val as u32);
             }

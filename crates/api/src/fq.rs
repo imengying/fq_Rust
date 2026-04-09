@@ -74,10 +74,7 @@ fn java_url_decode(value: &str) -> String {
                 i += 1;
             }
             b'%' if i + 2 < bytes.len() => {
-                if let (Some(hi), Some(lo)) = (
-                    hex_val(bytes[i + 1]),
-                    hex_val(bytes[i + 2]),
-                ) {
+                if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
                     result.push(hi << 4 | lo);
                     i += 3;
                 } else {
@@ -189,13 +186,22 @@ pub fn build_common_params(device: &DeviceProfile) -> Vec<(String, String)> {
         ("channel".to_string(), "googleplay".to_string()),
         ("aid".to_string(), device.device.aid.clone()),
         ("app_name".to_string(), "novelapp".to_string()),
-        ("version_code".to_string(), device.device.version_code.clone()),
-        ("version_name".to_string(), device.device.version_name.clone()),
+        (
+            "version_code".to_string(),
+            device.device.version_code.clone(),
+        ),
+        (
+            "version_name".to_string(),
+            device.device.version_name.clone(),
+        ),
         ("device_platform".to_string(), "android".to_string()),
         ("os".to_string(), "android".to_string()),
         ("ssmix".to_string(), "a".to_string()),
         ("device_type".to_string(), device.device.device_type.clone()),
-        ("device_brand".to_string(), device.device.device_brand.clone()),
+        (
+            "device_brand".to_string(),
+            device.device.device_brand.clone(),
+        ),
         ("language".to_string(), "zh".to_string()),
         ("os_api".to_string(), device.device.os_api.clone()),
         ("os_version".to_string(), device.device.os_version.clone()),
@@ -228,12 +234,10 @@ pub fn merge_headers(
 ) -> ServiceResult<HeaderMap> {
     let mut headers = HeaderMap::new();
     for (key, value) in original.iter().chain(signed.iter()) {
-        let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|error| {
-            ServiceError::internal(format!("非法请求头名称 {key}: {error}"))
-        })?;
-        let header_value = HeaderValue::from_str(value).map_err(|error| {
-            ServiceError::internal(format!("非法请求头值 {key}: {error}"))
-        })?;
+        let header_name = HeaderName::from_bytes(key.as_bytes())
+            .map_err(|error| ServiceError::internal(format!("非法请求头名称 {key}: {error}")))?;
+        let header_value = HeaderValue::from_str(value)
+            .map_err(|error| ServiceError::internal(format!("非法请求头值 {key}: {error}")))?;
         headers.insert(header_name, header_value);
     }
     Ok(headers)

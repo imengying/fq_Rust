@@ -1,7 +1,28 @@
-pub mod library_resolver;
 pub mod library_file;
+pub mod library_resolver;
 pub mod svc_memory;
 
+use crate::backend::{Backend, Permission, RegisterARM64};
+use crate::elf::abi::*;
+use crate::elf::parser::ElfFile;
+use crate::elf::segment::ElfSegmentData;
+use crate::elf::symbol::ElfSymbol;
+use crate::elf::symbol_structure::SymbolLocator;
+use crate::emulator::memory::MemoryMap;
+use crate::emulator::{
+    AndroidEmulator, RcUnsafeCell, VMPointer, MMAP_BASE, STACK_BASE, STACK_SIZE_OF_PAGE,
+};
+use crate::linux::init_fun::{AbsoluteInitFunction, InitFunction, LinuxInitFunction};
+use crate::linux::symbol::{LinuxSymbol, ModuleSymbol, WEAK_BASE};
+use crate::linux::{LinuxModule, PAGE_ALIGN};
+use crate::memory::library_file::{LibraryFile, LibraryFileTrait};
+use crate::memory::svc_memory::HookListener;
+use crate::tool;
+use crate::tool::{align_addr, align_size, get_segment_protection, Alignment, UnicornArg};
+use anyhow::anyhow;
+use bytes::{BufMut, Bytes, BytesMut};
+use indexmap::IndexMap;
+use log::{error, info, warn};
 use std::cell::UnsafeCell;
 use std::cmp::max;
 use std::collections::{HashMap, VecDeque};
@@ -9,25 +30,6 @@ use std::hash::Hash;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
-use anyhow::anyhow;
-use bytes::{BufMut, Bytes, BytesMut};
-use indexmap::IndexMap;
-use log::{error, info, warn};
-use crate::backend::{Backend, Permission, RegisterARM64};
-use crate::elf::abi::{*};
-use crate::elf::parser::ElfFile;
-use crate::elf::segment::ElfSegmentData;
-use crate::elf::symbol::ElfSymbol;
-use crate::elf::symbol_structure::SymbolLocator;
-use crate::emulator::{AndroidEmulator, MMAP_BASE, RcUnsafeCell, STACK_BASE, STACK_SIZE_OF_PAGE, VMPointer};
-use crate::emulator::memory::MemoryMap;
-use crate::linux::{LinuxModule, PAGE_ALIGN};
-use crate::linux::init_fun::{AbsoluteInitFunction, InitFunction, LinuxInitFunction};
-use crate::linux::symbol::{LinuxSymbol, ModuleSymbol, WEAK_BASE};
-use crate::memory::library_file::{LibraryFile, LibraryFileTrait};
-use crate::memory::svc_memory::HookListener;
-use crate::tool;
-use crate::tool::{align_addr, align_size, Alignment, get_segment_protection, UnicornArg};
 
 const IFUNC_ARG_HWCAP_FLAG: u64 = 1u64 << 62;
 const IFUNC_ARG_SIZE: u64 = 24;
@@ -44,13 +46,19 @@ pub(crate) struct ModuleMemRegion {
 }
 
 impl ModuleMemRegion {
-    pub fn new(virtual_address: u64, begin: u64, end: u64, perms: u32, offset: i64) -> ModuleMemRegion {
+    pub fn new(
+        virtual_address: u64,
+        begin: u64,
+        end: u64,
+        perms: u32,
+        offset: i64,
+    ) -> ModuleMemRegion {
         ModuleMemRegion {
             virtual_address,
             begin,
             end,
             perms,
-            offset
+            offset,
         }
     }
 }
@@ -76,10 +84,15 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
     pub(crate) fn new(
         backend: Backend<'a, T>,
         pid: u32,
-        proc_name: String
+        proc_name: String,
     ) -> anyhow::Result<(AndroidElfLoader<'a, T>, u64)> {
         let stack_size = STACK_SIZE_OF_PAGE * PAGE_ALIGN;
-        backend.mem_map(STACK_BASE - stack_size as u64, stack_size, (Permission::READ | Permission::WRITE).bits())
+        backend
+            .mem_map(
+                STACK_BASE - stack_size as u64,
+                stack_size,
+                (Permission::READ | Permission::WRITE).bits(),
+            )
             .expect("failed to init stack");
 
         let mut memory = AndroidElfLoader {
@@ -92,7 +105,8 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             hook_listeners: vec![],
             memory_map: HashMap::with_capacity(64),
             modules: IndexMap::new(),
-            malloc: None, free: None,
+            malloc: None,
+            free: None,
             temp_memory: HashMap::new(),
             cache_hook: HashMap::new(),
         };
@@ -120,8 +134,15 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         self.mmap_base = mmap_base;
     }
 
-    pub fn load_virtual_module(&mut self, name: String, symbols: std::collections::HashMap<String, u64>) -> RcUnsafeCell<LinuxModule<'a, T>> {
-        let module = Rc::new(UnsafeCell::new(LinuxModule::create_virtual_module(name.clone(), symbols)));
+    pub fn load_virtual_module(
+        &mut self,
+        name: String,
+        symbols: std::collections::HashMap<String, u64>,
+    ) -> RcUnsafeCell<LinuxModule<'a, T>> {
+        let module = Rc::new(UnsafeCell::new(LinuxModule::create_virtual_module(
+            name.clone(),
+            symbols,
+        )));
         let mm = module.clone();
         self.modules.insert(name.clone(), module);
         mm
@@ -147,7 +168,12 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         }
     }
 
-    pub(crate) fn load_internal(&mut self, library_file: LibraryFile, force_init: bool, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
+    pub(crate) fn load_internal(
+        &mut self,
+        library_file: LibraryFile,
+        force_init: bool,
+        emulator: &AndroidEmulator<'a, T>,
+    ) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
         let module = self.load_library_file_internal(library_file, emulator)?;
         let module_base = unsafe { &*module.get() }.base;
 
@@ -171,7 +197,11 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         Ok(module.clone())
     }
 
-    pub(crate) fn resolve_symbols(&mut self, show_warning: bool, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<()> {
+    pub(crate) fn resolve_symbols(
+        &mut self,
+        show_warning: bool,
+        emulator: &AndroidEmulator<'a, T>,
+    ) -> anyhow::Result<()> {
         for (name, module_cell) in &self.modules {
             let m = unsafe { &mut *module_cell.get() };
             if m.elf_file.is_none() {
@@ -181,7 +211,14 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
 
             let mut resolved_symbol = Vec::new();
             for module_symbol in &m.unresolved_symbol {
-                let resolved = module_symbol.resolve(emulator, &self.modules, true, &self.hook_listeners, &mut self.cache_hook, elf_file);
+                let resolved = module_symbol.resolve(
+                    emulator,
+                    &self.modules,
+                    true,
+                    &self.hook_listeners,
+                    &mut self.cache_hook,
+                    elf_file,
+                );
                 if let Ok(resolved) = resolved {
                     resolved_symbol.push(resolved);
                     //resolved.relocation(m, elf_file, &self.backend)?;
@@ -197,7 +234,11 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         Ok(())
     }
 
-    fn load_library_file_internal(&mut self, library_file: LibraryFile, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
+    fn load_library_file_internal(
+        &mut self,
+        library_file: LibraryFile,
+        emulator: &AndroidEmulator<'a, T>,
+    ) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
         let elf_file_cell = ElfFile::from_buffer(library_file.map_buffer()?);
         let elf_file = unsafe { &*elf_file_cell.get() };
 
@@ -208,17 +249,22 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             return Err(anyhow!("Only support endianness: LSB"));
         }
         if elf_file.object_size == 1 {
-            return Err(anyhow!("Must be 64-bit: elf class"))
+            return Err(anyhow!("Must be 64-bit: elf class"));
         }
         if elf_file.arch != 0xB7 {
-            return Err(anyhow!("Must be 64-bit: elf arch ({}), path: {}", elf_file.arch, library_file.real_path()))
+            return Err(anyhow!(
+                "Must be 64-bit: elf arch ({}), path: {}",
+                elf_file.arch,
+                library_file.real_path()
+            ));
         }
 
         let mut bound_high = 0u64;
         let mut align = 0u64;
         if elf_file.num_ph > 0 {
             for i in 0..elf_file.num_ph {
-                let ph = elf_file.get_program_header(i as usize)
+                let ph = elf_file
+                    .get_program_header(i as usize)
                     .expect("get_program_header failed: calc bound_high");
                 if ph.typ == PT_LOAD && ph.mem_size > 0 {
                     let high = ph.virtual_address + ph.mem_size as u64;
@@ -231,7 +277,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                 }
             }
         } else {
-            return Err(anyhow!("ph_num > 0"))
+            return Err(anyhow!("ph_num > 0"));
         }
 
         let base_align = max(align, PAGE_ALIGN as u64);
@@ -248,11 +294,13 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         let mut arm_ex_idx = None;
 
         for i in 0..elf_file.num_ph as usize {
-            let ph = elf_file.get_program_header(i)
+            let ph = elf_file
+                .get_program_header(i)
                 .expect("get_program_header failed: calc align");
             match ph.typ {
                 PT_LOAD => {
-                    let mut prot = get_segment_protection(u32::from_le_bytes(ph.flags.to_le_bytes()));
+                    let mut prot =
+                        get_segment_protection(u32::from_le_bytes(ph.flags.to_le_bytes()));
                     if prot == Permission::NONE.bits() {
                         prot = Permission::ALL.bits();
                     }
@@ -262,9 +310,17 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                         load_virtual_address = begin;
                     }
 
-                    let check = align_addr(begin, ph.mem_size as u64, max(PAGE_ALIGN as i64, ph.align as i64));
+                    let check = align_addr(
+                        begin,
+                        ph.mem_size as u64,
+                        max(PAGE_ALIGN as i64, ph.align as i64),
+                    );
                     let region_size = regions.len();
-                    let last = if region_size == 0 { None } else { Some(&regions[region_size - 1]) };
+                    let last = if region_size == 0 {
+                        None
+                    } else {
+                        Some(&regions[region_size - 1])
+                    };
                     let overall = if let Some(last) = last {
                         if check.address >= last.begin && check.address < last.end {
                             Some(last)
@@ -278,23 +334,49 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                     if let Some(overall) = overall {
                         let overall_size = overall.end - check.address;
                         let perms = overall.perms | prot;
-                        self.backend.mem_protect(check.address, overall_size as usize, perms)
+                        self.backend
+                            .mem_protect(check.address, overall_size as usize, perms)
                             .expect("mem_protect failed");
                         if ph.mem_size as u64 > overall_size {
-                            let mut alignment = self.mem_map(begin + overall_size, ph.mem_size as usize - overall_size as usize, prot, library_file.name(), max(PAGE_ALIGN as u64, ph.align));
-                            regions.push(ModuleMemRegion::new(begin, alignment.address, alignment.address + alignment.size as u64, prot, ph.virtual_address as i64));
+                            let mut alignment = self.mem_map(
+                                begin + overall_size,
+                                ph.mem_size as usize - overall_size as usize,
+                                prot,
+                                library_file.name(),
+                                max(PAGE_ALIGN as u64, ph.align),
+                            );
+                            regions.push(ModuleMemRegion::new(
+                                begin,
+                                alignment.address,
+                                alignment.address + alignment.size as u64,
+                                prot,
+                                ph.virtual_address as i64,
+                            ));
                             if let Some(last_alignment) = last_alignment {
                                 if last_alignment.begin + last_alignment.data_size > begin {
-                                    return Err(anyhow!("last_alignment.begin + last_alignment.data_size > begin"));
+                                    return Err(anyhow!(
+                                        "last_alignment.begin + last_alignment.data_size > begin"
+                                    ));
                                 }
                             }
                             alignment.begin = begin;
                             last_alignment = Some(alignment);
                         }
-                    }
-                    else {
-                        let mut alignment = self.mem_map(begin, ph.mem_size as usize, prot, library_file.name(), max(PAGE_ALIGN as u64, ph.align));
-                        regions.push(ModuleMemRegion::new(begin, alignment.address, alignment.address + alignment.size as u64, prot, ph.virtual_address as i64));
+                    } else {
+                        let mut alignment = self.mem_map(
+                            begin,
+                            ph.mem_size as usize,
+                            prot,
+                            library_file.name(),
+                            max(PAGE_ALIGN as u64, ph.align),
+                        );
+                        regions.push(ModuleMemRegion::new(
+                            begin,
+                            alignment.address,
+                            alignment.address + alignment.size as u64,
+                            prot,
+                            ph.virtual_address as i64,
+                        ));
                         if let Some(last_alignment) = last_alignment {
                             let base = last_alignment.address + last_alignment.size as u64;
                             let off = alignment.address as i64 - base as i64;
@@ -302,9 +384,17 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                                 return Err(anyhow!("off < 0"));
                             }
                             if off > 0 {
-                                self.backend.mem_map(base, off as usize, Permission::NONE.bits())
+                                self.backend
+                                    .mem_map(base, off as usize, Permission::NONE.bits())
                                     .expect("mem_map failed");
-                                if self.memory_map.insert(base, MemoryMap::new(base, off as usize, Permission::NONE.bits())).is_some() {
+                                if self
+                                    .memory_map
+                                    .insert(
+                                        base,
+                                        MemoryMap::new(base, off as usize, Permission::NONE.bits()),
+                                    )
+                                    .is_some()
+                                {
                                     warn!("mem_map replace exists memory map base=0x{:X}", base);
                                 }
                             }
@@ -315,7 +405,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
 
                     let load_data = match ph.data {
                         ElfSegmentData::PtLoad(data) => data.get_value()?,
-                        _ => return Err(anyhow!("ph.data is not PtLoad"))
+                        _ => return Err(anyhow!("ph.data is not PtLoad")),
                     };
                     load_data.write_to(begin, &self.backend);
                     if let Some(last_align) = last_alignment.as_mut() {
@@ -363,14 +453,19 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             info!("{} needed dependency {}", so_name, needed_library);
             let needed_library_file = self.modules.get(&needed_library);
             if let Some(needed_library_file) = needed_library_file {
-                unsafe { &*needed_library_file.get() }.ref_cnt.fetch_add(1, Ordering::Relaxed);
+                unsafe { &*needed_library_file.get() }
+                    .ref_cnt
+                    .fetch_add(1, Ordering::Relaxed);
                 let base_name = get_base_name(needed_library.as_str());
                 needed_libraries.insert(base_name, needed_library_file.clone());
-                continue
+                continue;
             }
- 
-            let needed_library_file = library_file.resolve_library(needed_library.as_str())
-                .or_else(|_| library_resolver::resolve_library_static(emulator, needed_library.as_str()));
+
+            let needed_library_file = library_file
+                .resolve_library(needed_library.as_str())
+                .or_else(|_| {
+                    library_resolver::resolve_library_static(emulator, needed_library.as_str())
+                });
 
             if needed_library_file.is_err() {
                 return Err(anyhow!("Failed to resolve library: {}", needed_library));
@@ -378,7 +473,9 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
 
             if let Ok(needed_library_file) = needed_library_file {
                 let needed = self.load_library_file_internal(needed_library_file, emulator)?;
-                unsafe { &*needed.get() }.ref_cnt.fetch_add(1, Ordering::Relaxed);
+                unsafe { &*needed.get() }
+                    .ref_cnt
+                    .fetch_add(1, Ordering::Relaxed);
                 let base_name = get_base_name(needed_library.as_str());
                 needed_libraries.insert(base_name, needed);
             }
@@ -387,9 +484,18 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         for (_, module) in &self.modules {
             let linux_module = unsafe { &mut *module.get() };
             linux_module.unresolved_symbol.retain(|symbol| {
-                let resloved = symbol.resolve(emulator, &linux_module.needed_libraries, false, &self.hook_listeners, &mut self.cache_hook, elf_file);
+                let resloved = symbol.resolve(
+                    emulator,
+                    &linux_module.needed_libraries,
+                    false,
+                    &self.hook_listeners,
+                    &mut self.cache_hook,
+                    elf_file,
+                );
                 if let Ok(resloved) = resloved {
-                    resloved.relocation_ex(&mut linux_module.resolved_symbol, elf_file, &self.backend).ok();
+                    resloved
+                        .relocation_ex(&mut linux_module.resolved_symbol, elf_file, &self.backend)
+                        .ok();
                     return true;
                 }
                 return false;
@@ -402,25 +508,46 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             let typ = relocation.typ();
             if typ == 0 {
                 warn!("relocation typ is 0");
-                continue
+                continue;
             }
-            let symbol = if relocation.sym() == 0 { None } else {
-                relocation.symbol()
+            let symbol = if relocation.sym() == 0 {
+                None
+            } else {
+                relocation
+                    .symbol()
                     .map_err(|e| panic!("Failed to get symbol by name: {:?}", e))
                     .ok()
             };
             let sym_value = symbol.as_ref().map(|s| s.value).unwrap_or(0);
-            let relocation_addr = VMPointer::new(load_base + relocation.offset(), 0, self.backend.clone());
+            let relocation_addr =
+                VMPointer::new(load_base + relocation.offset(), 0, self.backend.clone());
 
             let mut module_symbol: Option<ModuleSymbol> = None;
             match typ as u32 {
                 R_AARCH64_ABS64 => {
                     let offset = relocation_addr.read_i64_with_offset(0)?;
-                    module_symbol = self.resolve_symbol(load_base, &symbol, &relocation_addr, so_name.as_str(), &needed_libraries, offset as u64, emulator, elf_file)
+                    module_symbol = self
+                        .resolve_symbol(
+                            load_base,
+                            &symbol,
+                            &relocation_addr,
+                            so_name.as_str(),
+                            &needed_libraries,
+                            offset as u64,
+                            emulator,
+                            elf_file,
+                        )
                         .map_err(|e| warn!("resolve symbol failed: {:?}", e))
                         .ok();
                     if module_symbol.is_none() {
-                        list.push(ModuleSymbol::new(so_name.clone(), load_base as i64, symbol.clone(), relocation_addr.addr, "".to_string(), offset as u64));
+                        list.push(ModuleSymbol::new(
+                            so_name.clone(),
+                            load_base as i64,
+                            symbol.clone(),
+                            relocation_addr.addr,
+                            "".to_string(),
+                            offset as u64,
+                        ));
                     } else {
                         resolved_symbols.push(module_symbol.unwrap());
                     }
@@ -434,11 +561,28 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                     }
                 }
                 R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT => {
-                    module_symbol = self.resolve_symbol(load_base, &symbol, &relocation_addr, so_name.as_str(), &needed_libraries, relocation.addend as u64, emulator, elf_file)
+                    module_symbol = self
+                        .resolve_symbol(
+                            load_base,
+                            &symbol,
+                            &relocation_addr,
+                            so_name.as_str(),
+                            &needed_libraries,
+                            relocation.addend as u64,
+                            emulator,
+                            elf_file,
+                        )
                         .map_err(|e| warn!("resolve symbol failed: {:?}", e))
                         .ok();
                     if module_symbol.is_none() {
-                        list.push(ModuleSymbol::new(so_name.clone(), load_base as i64, symbol.clone(), relocation_addr.addr, "".to_string(), relocation.addend as u64));
+                        list.push(ModuleSymbol::new(
+                            so_name.clone(),
+                            load_base as i64,
+                            symbol.clone(),
+                            relocation_addr.addr,
+                            "".to_string(),
+                            relocation.addend as u64,
+                        ));
                     } else {
                         resolved_symbols.push(module_symbol.unwrap());
                     }
@@ -448,8 +592,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                     relocation_addr.write_u64(value)?;
                     warn!(
                         "Approximated R_AARCH64_TLS_TPREL relocation at 0x{:X} with value 0x{:X}",
-                        relocation_addr.addr,
-                        value
+                        relocation_addr.addr, value
                     );
                 }
                 R_AARCH64_IRELATIVE => {
@@ -486,9 +629,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                     relocation_addr.write_u64(resolved)?;
                     warn!(
                         "Resolved R_AARCH64_IRELATIVE relocation at 0x{:X} via 0x{:X} -> 0x{:X}",
-                        relocation_addr.addr,
-                        resolver,
-                        resolved
+                        relocation_addr.addr, resolver, resolved
                     );
                 }
                 R_AARCH64_COPY => {
@@ -521,14 +662,22 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                         println!("[{}] offset: 0x{:X} (push)", so_name, address - load_base);
                     }
 
-                    init_function_list.push_back(InitFunction::ABSOLUTE(AbsoluteInitFunction::new(load_base, so_name.clone(), ptr)?))
+                    init_function_list.push_back(InitFunction::ABSOLUTE(AbsoluteInitFunction::new(
+                        load_base,
+                        so_name.clone(),
+                        ptr,
+                    )?))
                 }
             }
         }
         if elf_file.file_type == 3 {
             let init = dynamic_structure.init;
             if init > 0 {
-                init_function_list.push_back(InitFunction::LINUX(LinuxInitFunction::new(load_base, so_name.clone(), init as u64)));
+                init_function_list.push_back(InitFunction::LINUX(LinuxInitFunction::new(
+                    load_base,
+                    so_name.clone(),
+                    init as u64,
+                )));
             }
 
             let init_array_size = dynamic_structure.init_array_size;
@@ -546,14 +695,17 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
                         println!("[{}] offset: 0x{:X} (push)", so_name, address - load_base);
                     }
 
-                    init_function_list.push_back(InitFunction::ABSOLUTE(AbsoluteInitFunction::new(load_base, so_name.clone(), ptr)?))
+                    init_function_list.push_back(InitFunction::ABSOLUTE(AbsoluteInitFunction::new(
+                        load_base,
+                        so_name.clone(),
+                        ptr,
+                    )?))
                 }
             }
         }
 
         let dynsym = dynamic_structure.symbol_structure.get_value()?;
-        let symbol_tab_section = elf_file.find_section_by_type(SHT_SYMTAB)
-            .ok();
+        let symbol_tab_section = elf_file.find_section_by_type(SHT_SYMTAB).ok();
         if load_virtual_address == 0 {
             return Err(anyhow!("load_virtual_address is 0"));
         }
@@ -625,10 +777,17 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         needed_libraries: &IndexMap<String, RcUnsafeCell<LinuxModule<'a, T>>>,
         offset: u64,
         emulator: &AndroidEmulator<'a, T>,
-        elf_file: &ElfFile
+        elf_file: &ElfFile,
     ) -> anyhow::Result<ModuleSymbol> {
         if symbol.is_none() {
-            return Ok(ModuleSymbol::new(so_name.to_string(), load_base as i64, None, relocation_addr.addr, so_name.to_string(), offset));
+            return Ok(ModuleSymbol::new(
+                so_name.to_string(),
+                load_base as i64,
+                None,
+                relocation_addr.addr,
+                so_name.to_string(),
+                offset,
+            ));
         }
 
         if let Some(symbol) = symbol {
@@ -639,37 +798,94 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
 
                 if self.cache_hook.contains_key(&hash) {
                     let hook = self.cache_hook.get(&hash).unwrap();
-                    return Ok(ModuleSymbol::new(so_name.to_string(), WEAK_BASE, Some(symbol.clone()), relocation_addr.addr, so_name.to_string(), *hook));
+                    return Ok(ModuleSymbol::new(
+                        so_name.to_string(),
+                        WEAK_BASE,
+                        Some(symbol.clone()),
+                        relocation_addr.addr,
+                        so_name.to_string(),
+                        *hook,
+                    ));
                 }
 
                 for hook in &self.hook_listeners {
-                    let hook = hook.hook(emulator, so_name.to_string(), symbol_name.clone(), load_base + symbol.value as u64 + offset);
+                    let hook = hook.hook(
+                        emulator,
+                        so_name.to_string(),
+                        symbol_name.clone(),
+                        load_base + symbol.value as u64 + offset,
+                    );
                     if hook > 0 {
                         self.cache_hook.insert(hash, hook);
-                        return Ok(ModuleSymbol::new(so_name.to_string(), WEAK_BASE, Some(symbol.clone()), relocation_addr.addr, so_name.to_string(), hook));
+                        return Ok(ModuleSymbol::new(
+                            so_name.to_string(),
+                            WEAK_BASE,
+                            Some(symbol.clone()),
+                            relocation_addr.addr,
+                            so_name.to_string(),
+                            hook,
+                        ));
                     }
                 }
 
-                return Ok(ModuleSymbol::new(so_name.to_string(), load_base as i64, Some(symbol.clone()), relocation_addr.addr, so_name.to_string(), offset));
+                return Ok(ModuleSymbol::new(
+                    so_name.to_string(),
+                    load_base as i64,
+                    Some(symbol.clone()),
+                    relocation_addr.addr,
+                    so_name.to_string(),
+                    offset,
+                ));
             }
 
-            let module = ModuleSymbol::new(so_name.to_string(), load_base as i64, Some(symbol.clone()), relocation_addr.addr, "".to_string(), offset);
+            let module = ModuleSymbol::new(
+                so_name.to_string(),
+                load_base as i64,
+                Some(symbol.clone()),
+                relocation_addr.addr,
+                "".to_string(),
+                offset,
+            );
 
-            return module.resolve(emulator, needed_libraries, false, &self.hook_listeners, &mut self.cache_hook, elf_file);
+            return module.resolve(
+                emulator,
+                needed_libraries,
+                false,
+                &self.hook_listeners,
+                &mut self.cache_hook,
+                elf_file,
+            );
         }
 
         Err(anyhow!("symbol is none"))
     }
 
-    pub fn mem_map(&mut self, address: u64, size: usize, prot: u32, library_name: String, align: u64) -> Alignment {
+    pub fn mem_map(
+        &mut self,
+        address: u64,
+        size: usize,
+        prot: u32,
+        library_name: String,
+        align: u64,
+    ) -> Alignment {
         let alignment = align_addr(address, size as u64, align as i64);
 
-
-        self.backend.mem_map(alignment.address, alignment.size, prot)
+        self.backend
+            .mem_map(alignment.address, alignment.size, prot)
             .expect("mem_map failed");
 
-        if self.memory_map.insert(alignment.address, MemoryMap::new(alignment.address, alignment.size, prot)).is_some() {
-            warn!("mem_map replace exists memory map base=0x{:X}", alignment.address);
+        if self
+            .memory_map
+            .insert(
+                alignment.address,
+                MemoryMap::new(alignment.address, alignment.size, prot),
+            )
+            .is_some()
+        {
+            warn!(
+                "mem_map replace exists memory map base=0x{:X}",
+                alignment.address
+            );
         }
 
         alignment
@@ -689,7 +905,8 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             self.stack_base = sp;
         }
         self.sp = sp;
-        self.backend.reg_write(RegisterARM64::SP, sp)
+        self.backend
+            .reg_write(RegisterARM64::SP, sp)
             .expect("failed to set stack base");
     }
 
@@ -707,7 +924,11 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         Ok(pointer)
     }
 
-    fn init_tls(&mut self, pid: u32, proc_name: String) -> anyhow::Result<(VMPointer<'a, T>, VMPointer<'a, T>)> {
+    fn init_tls(
+        &mut self,
+        pid: u32,
+        proc_name: String,
+    ) -> anyhow::Result<(VMPointer<'a, T>, VMPointer<'a, T>)> {
         let thread = self.allocate_stack(0x400);
         let mut buf = BytesMut::new();
         buf.put_u64_le(0); // next pointer
@@ -725,7 +946,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         const AT_RANDOM: u64 = 25; // AT_RANDOM is a pointer to 16 bytes of randomness on the stack.
         auxv.write_u64_with_offset(0, AT_RANDOM)?;
         auxv.write_u64_with_offset(8, __stack_chk_guard.addr)?;
-        const  AT_PAGESZ: u64 = 6;
+        const AT_PAGESZ: u64 = 6;
         auxv.write_u64_with_offset(8 * 2, AT_PAGESZ)?;
         auxv.write_u64_with_offset(8 * 3, PAGE_ALIGN as u64)?;
 
@@ -733,7 +954,7 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
             "ANDROID_DATA=/data",
             "ANDROID_ROOT=/system",
             "PATH=/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin",
-            "NO_ADDR_COMPAT_LAYOUT_FIXUP=1"
+            "NO_ADDR_COMPAT_LAYOUT_FIXUP=1",
         ];
         let environ = self.allocate_stack(8 * (envs.len() + 1));
         let mut pointer = environ.share(0);
@@ -750,17 +971,19 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
         argv.write_u64_with_offset(3 * 8, auxv.addr)?;
 
         let tls = self.allocate_stack(0x80 * 4 + 0x1000); // tls size: extra room for bionic TLS slots
-        // Zero-fill the entire TLS region so that libc's locale and other TLS variables default to
-        // NULL/0, preventing dereferences of uninitialized garbage pointers.
+                                                          // Zero-fill the entire TLS region so that libc's locale and other TLS variables default to
+                                                          // NULL/0, preventing dereferences of uninitialized garbage pointers.
         let tls_zero = vec![0u8; 0x80 * 4 + 0x1000];
-        self.backend.mem_write(tls.addr, &tls_zero)
+        self.backend
+            .mem_write(tls.addr, &tls_zero)
             .expect("failed to zero-fill TLS region");
         //tls.write_u64_with_offset(0, 0x11_45_14).unwrap();
         tls.write_u64_with_offset(8, thread.addr).unwrap();
         let errno = tls.share(8 * 2);
         tls.write_u64_with_offset(8 * 3, argv.addr).unwrap();
 
-        self.backend.reg_write(RegisterARM64::TPIDR_EL0, tls.addr)
+        self.backend
+            .reg_write(RegisterARM64::TPIDR_EL0, tls.addr)
             .map_err(|e| anyhow!("init tls failed: {:?}", e))?;
 
         let mut sp = self.sp;
@@ -771,7 +994,11 @@ impl<'a, T: Clone> AndroidElfLoader<'a, T> {
     }
 
     pub(crate) fn restore_thread_argv(&self) {
-        let tls = VMPointer::new(self.backend.reg_read(RegisterARM64::TPIDR_EL0).unwrap(), 0, self.backend.clone());
+        let tls = VMPointer::new(
+            self.backend.reg_read(RegisterARM64::TPIDR_EL0).unwrap(),
+            0,
+            self.backend.clone(),
+        );
         let argv = self.environ.share_with_size(-8 * 2, 0);
         tls.write_u64_with_offset(8 * 3, argv.addr).unwrap();
     }

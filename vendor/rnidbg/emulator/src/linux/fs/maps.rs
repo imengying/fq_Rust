@@ -80,5 +80,3 @@ impl<T: Clone> FileIOTrait<T> for Maps {
         panic!()
     }
 }
-
-

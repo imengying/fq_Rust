@@ -54,7 +54,11 @@ impl SignerClient {
         })
     }
 
-    pub async fn sign(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
+    pub async fn sign(
+        &self,
+        url: &str,
+        headers: &IndexMap<String, String>,
+    ) -> ServiceResult<SignResult> {
         let service = self.service.clone();
         let url = url.to_string();
         let headers = headers.clone();
@@ -101,7 +105,11 @@ impl NativeSignerService {
         Ok(Self { tx })
     }
 
-    fn sign_blocking(&self, url: &str, headers: &IndexMap<String, String>) -> ServiceResult<SignResult> {
+    fn sign_blocking(
+        &self,
+        url: &str,
+        headers: &IndexMap<String, String>,
+    ) -> ServiceResult<SignResult> {
         let headers_text = build_signature_input_headers(headers);
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -115,7 +123,11 @@ impl NativeSignerService {
         let raw = reply_rx
             .recv()
             .map_err(|_| ServiceError::internal("signer 响应通道已关闭"))??;
-        info!("signer raw output: len={}, {}", raw.len(), truncate(&raw, 800));
+        info!(
+            "signer raw output: len={}, {}",
+            raw.len(),
+            truncate(&raw, 800)
+        );
         Ok(SignResult {
             headers: parse_signature_result(&raw)?,
         })
@@ -147,11 +159,15 @@ impl SignerThreadState {
 
     fn sign(&mut self, url: &str, headers_text: &str) -> ServiceResult<String> {
         self.ensure_started()?;
-        match self.signer.as_mut().expect("signer initialized").sign(url, headers_text) {
+        match self
+            .signer
+            .as_mut()
+            .expect("signer initialized")
+            .sign(url, headers_text)
+        {
             Ok(raw) => Ok(raw),
             Err(error) => {
-                let initial_error =
-                    ServiceError::internal(format!("signer 请求失败: {error}"));
+                let initial_error = ServiceError::internal(format!("signer 请求失败: {error}"));
                 if self.should_restart_after_sign_error(&initial_error)
                     && self.restart_if_allowed("AUTO_RESTART:SIGNER_ERROR")?
                 {
@@ -162,9 +178,7 @@ impl SignerThreadState {
                         .expect("signer restarted")
                         .sign(url, headers_text)
                         .map_err(|retry_error| {
-                            ServiceError::internal(format!(
-                                "signer 请求失败: {retry_error}"
-                            ))
+                            ServiceError::internal(format!("signer 请求失败: {retry_error}"))
                         });
                 }
                 Err(initial_error)
@@ -239,8 +253,9 @@ fn parse_signature_result(raw: &str) -> ServiceResult<IndexMap<String, String>> 
     }
 
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        let parsed: IndexMap<String, String> = serde_json::from_str(trimmed)
-            .map_err(|error| ServiceError::internal(format!("signer 签名 JSON 解析失败: {error}")))?;
+        let parsed: IndexMap<String, String> = serde_json::from_str(trimmed).map_err(|error| {
+            ServiceError::internal(format!("signer 签名 JSON 解析失败: {error}"))
+        })?;
         return Ok(remove_header_ignore_case(parsed, "X-Neptune"));
     }
 

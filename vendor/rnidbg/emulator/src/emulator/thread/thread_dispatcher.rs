@@ -1,20 +1,28 @@
+use crate::emulator::signal::{
+    ISignalTask, SavableSignalTask, SigSet, SignalOps, SignalTask, UnixSigSet,
+};
+use crate::emulator::thread::{
+    AbstractTask, BaseThreadTask, CoveredTaskSignalOps, LuoTask, RunnableTask, Task, TaskStatus,
+};
+use crate::emulator::AndroidEmulator;
+use log::{debug, error, warn};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::ptr::read;
 use std::rc::Rc;
-use log::{debug, error, warn};
-use crate::emulator::AndroidEmulator;
-use crate::emulator::signal::{SignalOps, ISignalTask, SigSet, UnixSigSet, SavableSignalTask, SignalTask};
-use crate::emulator::thread::{AbstractTask, BaseThreadTask, CoveredTaskSignalOps, LuoTask, RunnableTask, Task, TaskStatus};
 
 pub type SavableTask<'a, T> = Rc<UnsafeCell<Box<dyn LuoTask<'a, T>>>>;
 
-pub trait ThreadDispatcher<'a, T: Clone>  {
+pub trait ThreadDispatcher<'a, T: Clone> {
     fn add_thread(&self, thread: AbstractTask<'a, T>);
 
     fn task_list(&self) -> &VecDeque<Rc<UnsafeCell<AbstractTask<'a, T>>>>;
 
-    fn run_main_for_result(&self, main_task: AbstractTask<'a, T>, emulator: AndroidEmulator<'a, T>) -> Option<u64>;
+    fn run_main_for_result(
+        &self,
+        main_task: AbstractTask<'a, T>,
+        emulator: AndroidEmulator<'a, T>,
+    ) -> Option<u64>;
 
     fn task_counts(&self) -> usize;
 
@@ -40,7 +48,7 @@ impl<'a, T: Clone> UniThreadDispatcher<'a, T> {
             thread_task: Rc::new(UnsafeCell::new(VecDeque::new())),
             signal_ops: Rc::new(UnsafeCell::new(CoveredTaskSignalOps {
                 sig_mask_set: None,
-                sig_pending_set: None
+                sig_pending_set: None,
             })),
             running_task: Rc::new(UnsafeCell::new(None)),
         }
@@ -78,11 +86,15 @@ impl<'a, T: Clone> UniThreadDispatcher<'a, T> {
         Ok(())
     }
 
-    fn run(&self, emulator: AndroidEmulator<'a, T>, timeout_sec: u64) -> anyhow::Result<Option<u64>> {
+    fn run(
+        &self,
+        emulator: AndroidEmulator<'a, T>,
+        timeout_sec: u64,
+    ) -> anyhow::Result<Option<u64>> {
         let start = std::time::Instant::now();
         loop {
             if self.task_list_mut().is_empty() {
-                break Ok(None)
+                break Ok(None);
             }
 
             let mut main_ret = None;
@@ -263,21 +275,25 @@ impl<'a, T: Clone> UniThreadDispatcher<'a, T> {
                 unsafe {
                     *self.running_task.get() = None;
                 }
-                return Ok(main_ret)
+                return Ok(main_ret);
             }
 
             if run_task_count == 0 {
-                break Ok(None)
+                break Ok(None);
             }
 
             if !self.thread_task_mut().is_empty() {
-                let rev_thread_tasks = self.thread_task_mut()
+                let rev_thread_tasks = self
+                    .thread_task_mut()
                     .iter()
                     .map(|t| t.clone())
                     .collect::<Vec<_>>();
                 self.thread_task_mut().clear();
                 if option_env!("EMU_LOG") == Some("1") {
-                    println!("thread dispatcher: add thread task count: {}", rev_thread_tasks.len());
+                    println!(
+                        "thread dispatcher: add thread task count: {}",
+                        rev_thread_tasks.len()
+                    );
                 }
                 for task_cell in rev_thread_tasks {
                     self.task_list_mut().push_front(task_cell);
@@ -290,7 +306,7 @@ impl<'a, T: Clone> UniThreadDispatcher<'a, T> {
                 unsafe {
                     *self.running_task.get() = None;
                 }
-                return Ok(None)
+                return Ok(None);
             }
 
             if self.task_list_mut().is_empty() {
@@ -298,7 +314,7 @@ impl<'a, T: Clone> UniThreadDispatcher<'a, T> {
                 unsafe {
                     *self.running_task.get() = None;
                 }
-                return Ok(None)
+                return Ok(None);
             }
         }
     }
@@ -315,40 +331,44 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
         self.task_list_mut()
     }
 
-    fn run_main_for_result(&self, main_task: AbstractTask<'a, T>, emulator: AndroidEmulator<'a, T>) -> Option<u64> {
-        self.task_list_mut().push_front(Rc::new(UnsafeCell::new(main_task)));
+    fn run_main_for_result(
+        &self,
+        main_task: AbstractTask<'a, T>,
+        emulator: AndroidEmulator<'a, T>,
+    ) -> Option<u64> {
+        self.task_list_mut()
+            .push_front(Rc::new(UnsafeCell::new(main_task)));
         let ret = self.run(emulator.clone(), 0);
-        self.task_list_mut().retain(|task| {
-            match unsafe { &*task.get() } {
+        self.task_list_mut()
+            .retain(|task| match unsafe { &*task.get() } {
                 AbstractTask::Function64(task) => {
                     if task.is_finish() {
                         task.destroy(&emulator);
                         for signal_task_cell in task.get_signal_task_list() {
                             let signal_task = match unsafe { &mut *signal_task_cell.get() } {
                                 AbstractTask::SignalTask(task) => task,
-                                _ => panic!("直到这一刻来临，不甘熄灭的星")
+                                _ => panic!("直到这一刻来临，不甘熄灭的星"),
                             };
                             signal_task.destroy(&emulator);
                         }
                     }
                     !task.is_finish()
-                },
+                }
                 AbstractTask::MarshmallowThread(task) => {
                     if task.is_finish() {
                         task.destroy(&emulator);
                         for signal_task_cell in task.get_signal_task_list() {
                             let signal_task = match unsafe { &mut *signal_task_cell.get() } {
                                 AbstractTask::SignalTask(task) => task,
-                                _ => panic!("缘分让我们相遇在乱世之外")
+                                _ => panic!("缘分让我们相遇在乱世之外"),
                             };
                             signal_task.destroy(&emulator);
                         }
                     }
                     !task.is_finish()
-                },
-                _ => true
-            }
-        });
+                }
+                _ => true,
+            });
         drop(emulator);
         if let Ok(Some(ret)) = ret {
             Some(ret)
@@ -380,7 +400,7 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
                     }
                 }
                 AbstractTask::SignalTask(_) => continue,
-                AbstractTask::KitKatThread(_) => unreachable!()
+                AbstractTask::KitKatThread(_) => unreachable!(),
             }
         }
         size
@@ -392,7 +412,7 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
         tasks.extend(self.thread_task());
 
         if tasks.is_empty() {
-            return false
+            return false;
         }
 
         for task_cell in tasks {
@@ -404,7 +424,7 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
                     } else if tid == function64.get_id() {
                         function64.signal_ops_mut()
                     } else {
-                        continue
+                        continue;
                     };
                     //if sig_mask_set.is_none() {
                     //    signal_ops.set_sig_mask_set(Box::new(UnixSigSet::new(0)));
@@ -418,13 +438,16 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
                         if sig_set.contains_sig_number(sig) {
                             let sig_pending_set = signal_ops.get_sig_pending_set().unwrap();
                             sig_pending_set.add_sig_number(sig);
-                            return false
+                            return false;
                         }
                     }
 
                     if let Some(signal_task) = signal_task {
                         function64.add_signal_task(signal_task);
-                        if !std::env::var("DEBUG_FUQIULUO").unwrap_or("".to_string()).is_empty() {
+                        if !std::env::var("DEBUG_FUQIULUO")
+                            .unwrap_or("".to_string())
+                            .is_empty()
+                        {
                             panic!("旧的摇椅吱吱呀呀停不下")
                         }
                     } else {
@@ -451,13 +474,16 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
                         if sig_set.contains_sig_number(sig) {
                             let sig_pending_set = signal_ops.get_sig_pending_set().unwrap();
                             sig_pending_set.add_sig_number(sig);
-                            return false
+                            return false;
                         }
                     }
 
                     if let Some(signal_task) = signal_task {
                         thread_task.add_signal_task(signal_task);
-                        if !std::env::var("DEBUG_FUQIULUO").unwrap_or("".to_string()).is_empty() {
+                        if !std::env::var("DEBUG_FUQIULUO")
+                            .unwrap_or("".to_string())
+                            .is_empty()
+                        {
                             panic!("只有被遗忘才算走到终点吗？")
                         }
                     } else {
@@ -470,7 +496,6 @@ impl<'a, T: Clone> ThreadDispatcher<'a, T> for UniThreadDispatcher<'a, T> {
                     panic!("神啊可不可以让我感受一下")
                 }
             }
-
         }
 
         false

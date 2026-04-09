@@ -1,29 +1,21 @@
+use crate::emulator::POST_CALLBACK_SYSCALL_NUMBER;
+use crate::keystone;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use keystone_engine::{Arch, Keystone, Mode, OptionType, OptionValue};
-use crate::emulator::POST_CALLBACK_SYSCALL_NUMBER;
-use crate::keystone;
 
 pub fn assemble_no_check(asm: &str) -> Vec<u8> {
-    let engine =
-        Keystone::new(Arch::ARM64, Mode::LITTLE_ENDIAN)
-            .unwrap();
+    let engine = Keystone::new(Arch::ARM64, Mode::LITTLE_ENDIAN).unwrap();
 
-    let result = engine
-        .asm(asm.to_string(), 0)
-        .unwrap();
+    let result = engine.asm(asm.to_string(), 0).unwrap();
 
     result.bytes
 }
 
 pub fn assemble_no_check_v2(asm: &str, addr: u64) -> Vec<u8> {
-    let engine =
-        Keystone::new(Arch::ARM64, Mode::LITTLE_ENDIAN)
-            .unwrap();
+    let engine = Keystone::new(Arch::ARM64, Mode::LITTLE_ENDIAN).unwrap();
 
-    let result = engine
-        .asm(asm.to_string(), addr)
-        .unwrap();
+    let result = engine.asm(asm.to_string(), addr).unwrap();
 
     result.bytes
 }
@@ -69,11 +61,9 @@ fn test_assemble() {
         "svc #0",
         "ldp x29, x30, [sp]",
         "add sp, sp, #0x10",
-        "ret"
+        "ret",
     ];
-    let code = code.map(|code|
-        assemble(code).map_err(|e| eprintln!("{}", e)).unwrap()
-    );
+    let code = code.map(|code| assemble(code).map_err(|e| eprintln!("{}", e)).unwrap());
 
     let mut merged = BytesMut::new();
     for c in code {

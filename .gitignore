@@ -12,3 +12,5 @@
 **/.settings
 .codex
 /local
+start.sh
+.venv-test

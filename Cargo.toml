@@ -7,3 +7,6 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 authors = ["mengying"]
+
+[patch.crates-io]
+keystone-engine = { path = "vendor/keystone-engine" }

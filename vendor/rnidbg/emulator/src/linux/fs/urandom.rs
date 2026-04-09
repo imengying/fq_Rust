@@ -1,8 +1,8 @@
-use std::marker::PhantomData;
-use rand::Rng;
 use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::OFlag;
+use rand::Rng;
+use std::marker::PhantomData;
 
 pub struct URandom {
     pub path: String,
@@ -23,9 +23,7 @@ impl URandom {
 }
 
 impl<T: Clone> FileIOTrait<T> for URandom {
-    fn close(&mut self) {
-
-    }
+    fn close(&mut self) {}
 
     fn read(&mut self, buf: VMPointer<T>, count: usize) -> usize {
         let mut rng = rand::thread_rng();

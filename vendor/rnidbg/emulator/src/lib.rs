@@ -17,14 +17,14 @@
 )]
 
 pub mod android;
+mod backend;
+pub(crate) mod elf;
 pub mod emulator;
 pub mod keystone;
 pub mod linux;
 pub mod memory;
 pub mod pointer;
 pub(crate) mod tool;
-pub(crate) mod elf;
-mod backend;
 
 pub use emulator::AndroidEmulator;
 pub use tool::UnicornArg;

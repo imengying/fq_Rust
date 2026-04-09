@@ -1,14 +1,14 @@
-use std::any::Any;
-use std::cell::UnsafeCell;
-use std::rc::Rc;
 use crate::android::dvm::class::DvmClass;
-use crate::android::dvm::DalvikVM64;
 use crate::android::dvm::member::DvmMember;
+use crate::android::dvm::DalvikVM64;
 use crate::android::jni;
 use crate::android::jni::{JniValue, JNI_FLAG_OBJECT, JNI_FLAG_REF};
 use crate::dalvik;
 use crate::emulator::AndroidEmulator;
 use crate::tool::UnicornArg;
+use std::any::Any;
+use std::cell::UnsafeCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum DvmObject {
@@ -25,7 +25,7 @@ pub enum DvmObject {
     /// Class
     Class(Rc<DvmClass>),
     /// Ref
-    ObjectRef(i64)
+    ObjectRef(i64),
 }
 
 impl DvmObject {
@@ -47,27 +47,35 @@ impl DvmObject {
                 } else {
                     panic!("object ref not found: {}", ref_id);
                 }
-            },
+            }
             DvmObject::ByteArray(_) => dvm.resolve_class_unchecked("byte[]").1,
             DvmObject::String(_) => dvm.resolve_class_unchecked("java/lang/String").1,
         }
     }
 
-    pub fn call_method<T: Clone>(&self, emulator: &AndroidEmulator<T>, vm: &DalvikVM64<T>, method_name: &str, signature: &str, args: Vec<JniValue>) -> JniValue {
+    pub fn call_method<T: Clone>(
+        &self,
+        emulator: &AndroidEmulator<T>,
+        vm: &DalvikVM64<T>,
+        method_name: &str,
+        signature: &str,
+        args: Vec<JniValue>,
+    ) -> JniValue {
         let self_id = match self {
             DvmObject::ObjectRef(ref_id) => *ref_id,
-            _ => panic!("not an object ref")
+            _ => panic!("not an object ref"),
         };
         let class = self.get_class(vm);
         let members = vm.members.get(&class.id).unwrap();
-        let method = members.iter().find(|m| {
-            match m {
+        let method = members
+            .iter()
+            .find(|m| match m {
                 DvmMember::Field(_) => false,
                 DvmMember::Method(method) => {
                     method.name == method_name && method.signature == signature
                 }
-            }
-        }).expect("member not found");
+            })
+            .expect("member not found");
         if let DvmMember::Method(method) = method {
             if !method.is_jni_method() {
                 panic!("method is not a jni method");
@@ -147,7 +155,10 @@ impl DvmObject {
 fn any_unsafecell_or_rc_test() {
     let unsafe_cell: UnsafeCell<i32> = UnsafeCell::new(42);
     let boxed_any_unsafe_cell: Box<dyn Any> = Box::new(unsafe_cell);
-    if boxed_any_unsafe_cell.downcast_ref::<UnsafeCell<i32>>().is_some() {
+    if boxed_any_unsafe_cell
+        .downcast_ref::<UnsafeCell<i32>>()
+        .is_some()
+    {
         println!("It's an UnsafeCell<i32>");
     }
 

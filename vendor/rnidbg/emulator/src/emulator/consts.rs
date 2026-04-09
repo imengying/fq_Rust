@@ -15,7 +15,7 @@ pub const STACK_BASE: u64 = {
     }
 };
 
-pub const LR: u64 =        0x7ffff0000;
+pub const LR: u64 = 0x7ffff0000;
 //pub const MMAP_BASE: u64 = 0x7203_0000_0000;
 //pub const MMAP_BASE: u64 = 0x40000000;
 pub const MMAP_BASE: u64 = {

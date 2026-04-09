@@ -1,14 +1,17 @@
-use std::cell::UnsafeCell;
-use std::rc::Rc;
+use crate::backend::RegisterARM64;
+use crate::emulator::func::FunctionCall;
+use crate::emulator::signal::{ISignalTask, SavableSignalTask, SigSet, SignalOps, SignalTask};
+use crate::emulator::thread::main_task::LuoTask;
+use crate::emulator::thread::{
+    BaseMainTask, BaseThreadTask, CoveredTaskSignalOps, DestroyListener, RunnableTask, Task,
+    TaskStatus, Waiter, WaiterTrait,
+};
+use crate::emulator::AndroidEmulator;
+use crate::tool::{init_args, UnicornArg};
 use anyhow::anyhow;
 use log::info;
-use crate::backend::RegisterARM64;
-use crate::emulator::AndroidEmulator;
-use crate::emulator::func::FunctionCall;
-use crate::emulator::signal::{SavableSignalTask, SignalOps, ISignalTask, SigSet, SignalTask};
-use crate::emulator::thread::main_task::LuoTask;
-use crate::emulator::thread::{DestroyListener, BaseMainTask, RunnableTask, Task, WaiterTrait, BaseThreadTask, CoveredTaskSignalOps, Waiter, TaskStatus};
-use crate::tool::{init_args, UnicornArg};
+use std::cell::UnsafeCell;
+use std::rc::Rc;
 
 pub struct Function64<'a, T: Clone> {
     pub(crate) main_task: Rc<UnsafeCell<BaseMainTask<'a, T>>>,
@@ -18,7 +21,13 @@ pub struct Function64<'a, T: Clone> {
 }
 
 impl<'a, T: Clone> Function64<'a, T> {
-    pub fn new(pid: u32, address: u64, until: u64, args: Vec<UnicornArg>, padding_argument: bool) -> Self {
+    pub fn new(
+        pid: u32,
+        address: u64,
+        until: u64,
+        args: Vec<UnicornArg>,
+        padding_argument: bool,
+    ) -> Self {
         Self {
             main_task: Rc::new(UnsafeCell::new(BaseMainTask::new(pid, until))),
             padding_argument,
@@ -51,14 +60,15 @@ impl<'a, T: Clone> LuoTask<'a, T> for Function64<'a, T> {
         }
 
         let main_task = self.main_task_mut();
-        backend.reg_write(RegisterARM64::LR, main_task.until)
+        backend
+            .reg_write(RegisterARM64::LR, main_task.until)
             .expect("failed to write LR");
 
         Ok(emulator.emulate(self.address, main_task.until))
     }
 }
 
-impl<'a, T: Clone> RunnableTask<'a, T> for Function64<'a, T>  {
+impl<'a, T: Clone> RunnableTask<'a, T> for Function64<'a, T> {
     fn can_dispatch(&self) -> bool {
         let main_task = self.main_task_mut();
         main_task.can_dispatch()
@@ -114,7 +124,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for Function64<'a, T>  {
         main_task.push_function(emulator, call);
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         let main_task = self.main_task_mut();
         main_task.pop_function(emulator, address)
     }
@@ -136,7 +150,11 @@ impl<'a, T: Clone> Task<'a, T> for Function64<'a, T> {
         main_task.get_id()
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         panic!("人各有志")
     }
 

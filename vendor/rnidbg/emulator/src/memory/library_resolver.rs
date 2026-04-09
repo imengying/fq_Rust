@@ -1,9 +1,12 @@
-use std::path::Path;
-use log::{error, info};
 use crate::emulator::AndroidEmulator;
 use crate::memory::library_file::{ElfLibraryFile, LibraryFile};
+use log::{error, info};
+use std::path::Path;
 
-pub(crate) fn resolve_library_static<T: Clone>(emulator: &AndroidEmulator<T>, library_name: &str) -> anyhow::Result<LibraryFile> {
+pub(crate) fn resolve_library_static<T: Clone>(
+    emulator: &AndroidEmulator<T>,
+    library_name: &str,
+) -> anyhow::Result<LibraryFile> {
     if option_env!("EMU_LOG") == Some("1") {
         info!("resolve_library_static: {}", library_name);
     }
@@ -31,9 +34,15 @@ pub(crate) fn resolve_library_static<T: Clone>(emulator: &AndroidEmulator<T>, li
 
     if !path.exists() {
         error!("Library not found: {}", path.to_str().unwrap());
-        return Err(anyhow::anyhow!("Library not found: {}", path.to_str().unwrap()));
+        return Err(anyhow::anyhow!(
+            "Library not found: {}",
+            path.to_str().unwrap()
+        ));
     }
 
     let buffer = std::fs::read(path.as_path())?;
-    Ok(LibraryFile::Elf(ElfLibraryFile::new(buffer, path.to_str().unwrap().to_string())))
+    Ok(LibraryFile::Elf(ElfLibraryFile::new(
+        buffer,
+        path.to_str().unwrap().to_string(),
+    )))
 }

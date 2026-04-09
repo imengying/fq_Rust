@@ -1,11 +1,11 @@
+use crate::emulator::VMPointer;
+use crate::linux::file_system::{FileIOTrait, SeekResult, StMode, ST_DEV};
+use crate::linux::structs::{OFlag, Stat64, Timespec};
+use log::warn;
 use std::fs::File;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
-use log::warn;
-use crate::emulator::VMPointer;
-use crate::linux::file_system::{FileIOTrait, ST_DEV, StMode, SeekResult};
-use crate::linux::structs::{OFlag, Stat64, Timespec};
 
 pub struct LinuxFileIO<T: Clone> {
     pub fake_path: String,
@@ -36,18 +36,24 @@ impl<T: Clone> LinuxFileIO<T> {
             oflags,
             uid,
             st_mode,
-            pd: PhantomData
+            pd: PhantomData,
         }
     }
 
-    pub fn new_with_file(file: File, fake_path: &str, oflags: u32, uid: i32, st_mode: StMode) -> Self {
+    pub fn new_with_file(
+        file: File,
+        fake_path: &str,
+        oflags: u32,
+        uid: i32,
+        st_mode: StMode,
+    ) -> Self {
         LinuxFileIO {
             fake_path: fake_path.to_string(),
             data: file,
             oflags,
             uid,
             st_mode,
-            pd: PhantomData
+            pd: PhantomData,
         }
     }
 }
@@ -60,7 +66,8 @@ impl<T: Clone> FileIOTrait<T> for LinuxFileIO<T> {
     fn read(&mut self, buf: VMPointer<T>, count: usize) -> usize {
         let mut buffer = vec![0; count];
         let read = self.data.read(&mut buffer).unwrap();
-        buf.write_data(&buffer.as_slice()[..read]).expect("failed to write buffer");
+        buf.write_data(&buffer.as_slice()[..read])
+            .expect("failed to write buffer");
         read
     }
 
@@ -85,10 +92,10 @@ impl<T: Clone> FileIOTrait<T> for LinuxFileIO<T> {
             0 => SeekFrom::Start(offset as u64),
             1 => SeekFrom::Current(offset),
             2 => SeekFrom::End(offset),
-            _ => return SeekResult::WhenceError
+            _ => return SeekResult::WhenceError,
         };
         if let Ok(off) = self.data.seek(seek_from) {
-            return SeekResult::Ok(off as i64)
+            return SeekResult::Ok(off as i64);
         }
         SeekResult::OffsetError
     }
@@ -135,12 +142,10 @@ fn stat64_test() {
     //   dev_t st_rdev; \
     //   unsigned long __pad1; \
 
-
     //   off_t st_size; \
     //   int st_blksize; \
     //   int __pad2; \
     //   long st_blocks; \
-
 
     //   struct timespec st_atim; \
     //   struct timespec st_mtim; \
@@ -167,7 +172,7 @@ fn stat64_test() {
         pub st_ctime: Timespec,
 
         pub __unused4: u32,
-        pub __unused5: u32
+        pub __unused5: u32,
     }
 
     const STAT_SIZE: usize = std::mem::size_of::<MyStat64>();

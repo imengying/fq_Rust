@@ -1,12 +1,15 @@
+use crate::backend::RegisterARM64;
+use crate::emulator::func::FunctionCall;
+use crate::emulator::signal::{SavableSignalTask, SignalTask};
+use crate::emulator::thread::{
+    BaseThreadTask, CoveredTaskSignalOps, DestroyListener, LuoTask, RunnableTask, Task, TaskStatus,
+    Waiter,
+};
+use crate::emulator::{AndroidEmulator, VMPointer};
+use anyhow::anyhow;
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use anyhow::anyhow;
-use crate::backend::RegisterARM64;
-use crate::emulator::thread::{BaseThreadTask, CoveredTaskSignalOps, DestroyListener, LuoTask, RunnableTask, Task, TaskStatus, Waiter};
-use crate::emulator::{AndroidEmulator, VMPointer};
-use crate::emulator::func::FunctionCall;
-use crate::emulator::signal::{SavableSignalTask, SignalTask};
 
 pub struct MarshmallowThread<'a, T: Clone> {
     base_thread_task: Rc<UnsafeCell<BaseThreadTask<'a, T>>>,
@@ -25,8 +28,13 @@ impl<'a, T: Clone> MarshmallowThread<'a, T> {
         tid_ptr: Option<VMPointer<'a, T>>,
     ) -> Self {
         Self {
-            base_thread_task: Rc::new(UnsafeCell::new(BaseThreadTask::new(tid, emulator.get_lr().unwrap()))),
-            fn_, thread, tid_ptr,
+            base_thread_task: Rc::new(UnsafeCell::new(BaseThreadTask::new(
+                tid,
+                emulator.get_lr().unwrap(),
+            ))),
+            fn_,
+            thread,
+            tid_ptr,
             errno: None,
         }
     }
@@ -41,7 +49,8 @@ impl<'a, T: Clone> MarshmallowThread<'a, T> {
 
         if let Some(tid_ptr) = &self.tid_ptr {
             if tid_ptr.addr != 0 {
-                tid_ptr.write_i32_with_offset(0, 0)
+                tid_ptr
+                    .write_i32_with_offset(0, 0)
                     .expect("failed to write tid");
             }
         }
@@ -95,7 +104,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for MarshmallowThread<'a, T> {
         self.thread_task_mut().push_function(emulator, call)
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         self.thread_task_mut().pop_function(emulator, address)
     }
 
@@ -113,7 +126,11 @@ impl<'a, T: Clone> Task<'a, T> for MarshmallowThread<'a, T> {
         self.thread_task_mut().get_id()
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         self.thread_task_mut().dispatch_inner(emulator, luo_task)
     }
 
@@ -124,13 +141,17 @@ impl<'a, T: Clone> Task<'a, T> for MarshmallowThread<'a, T> {
 
         let tls = self.thread.share(0xb0);
         self.errno = Some(tls.share(16));
-        backend.reg_write(RegisterARM64::X0, self.thread.addr)
+        backend
+            .reg_write(RegisterARM64::X0, self.thread.addr)
             .map_err(|e| anyhow!("[thread_addr] failed to write X0: {:?}", e))?;
-        backend.reg_write(RegisterARM64::SP, stack.addr)
+        backend
+            .reg_write(RegisterARM64::SP, stack.addr)
             .map_err(|e| anyhow!("[stack_addr] failed to write SP: {:?}", e))?;
-        backend.reg_write(RegisterARM64::TPIDR_EL0, tls.addr)
+        backend
+            .reg_write(RegisterARM64::TPIDR_EL0, tls.addr)
             .map_err(|e| anyhow!("[tls_addr] failed to write TPIDR_EL0: {:?}", e))?;
-        backend.reg_write(RegisterARM64::LR, self.thread_task_mut().until)
+        backend
+            .reg_write(RegisterARM64::LR, self.thread_task_mut().until)
             .map_err(|e| anyhow!("[base_thread_until] failed to write LR: {:?}", e))?;
 
         self.thread_task_mut().dispatch_inner(emulator, self)
@@ -158,7 +179,8 @@ impl<'a, T: Clone> Task<'a, T> for MarshmallowThread<'a, T> {
 
     fn set_errno(&self, emulator: &AndroidEmulator<'a, T>, errno_value: i32) -> bool {
         if let Some(errno) = &self.errno {
-            errno.write_i32_with_offset(0, errno_value)
+            errno
+                .write_i32_with_offset(0, errno_value)
                 .expect("failed to write errno");
             return true;
         }
@@ -195,7 +217,9 @@ impl<'a, T: Clone> KitKatThread<'a, T> {
     ) -> Self {
         Self {
             base_thread_task: BaseThreadTask::new(tid, emulator.get_lr().unwrap()),
-            fn_, child_stack, arg,
+            fn_,
+            child_stack,
+            arg,
             errno: None,
             pd: PhantomData,
         }
@@ -212,7 +236,11 @@ impl<'a, T: Clone> Task<'a, T> for KitKatThread<'a, T> {
         panic!("持有一半的梦尚未回环")
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         panic!("许三生约定的千万羁绊")
     }
 
@@ -294,7 +322,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for KitKatThread<'a, T> {
         todo!()
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         todo!()
     }
 

@@ -1,32 +1,18 @@
 #![allow(non_snake_case)]
 
-pub mod class_resolver;
 pub mod class;
-pub mod object;
-pub mod member;
+pub mod class_resolver;
 mod jni_env_ext;
+pub mod member;
+pub mod object;
 
-use std::cmp::{max, min};
-use std::{fs, mem};
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{Read, Seek};
-use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
-use ansi_term::Color;
-use anyhow::anyhow;
-use bytes::{Buf, Bytes, BytesMut};
-use log::{error, info, warn};
-use sparse_list::SparseList;
 use crate::android::dvm::class::DvmClass;
 use crate::android::dvm::class_resolver::ClassResolver;
 use crate::android::dvm::jni_env_ext::initialize_env;
 use crate::android::dvm::member::{DvmField, DvmMember, DvmMethod};
 use crate::android::dvm::object::DvmObject;
 use crate::android::jni;
-use crate::android::jni::{Jni, JNI_FLAG_CLASS, JNI_FLAG_REF, JNI_FLAG_OBJECT, VaList, MethodAcc};
+use crate::android::jni::{Jni, MethodAcc, VaList, JNI_FLAG_CLASS, JNI_FLAG_OBJECT, JNI_FLAG_REF};
 use crate::android::structs::JNINativeMethod;
 use crate::backend::RegisterARM64;
 use crate::elf::abi::PT_LOAD;
@@ -37,6 +23,20 @@ use crate::memory::library_file::{ElfLibraryFile, LibraryFile};
 use crate::memory::svc_memory::{SimpleArm64Svc, SvcCallResult};
 use crate::pointer::VMPointer;
 use crate::tool::UnicornArg;
+use ansi_term::Color;
+use anyhow::anyhow;
+use bytes::{Buf, Bytes, BytesMut};
+use log::{error, info, warn};
+use sparse_list::SparseList;
+use std::cmp::{max, min};
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{Read, Seek};
+use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::{fs, mem};
 
 pub(crate) const JNI_OK: i64 = 0;
 pub(crate) const JNI_FALSE: i64 = 0;
@@ -49,7 +49,7 @@ pub(crate) const JNI_VERSION_1_6: i64 = 0x00010006;
 macro_rules! dalvik {
     ($emulator:expr) => {
         $emulator.inner_mut().dalvik.as_mut().unwrap()
-    }
+    };
 }
 
 pub struct DalvikVM64<'a, T: Clone> {
@@ -61,7 +61,7 @@ pub struct DalvikVM64<'a, T: Clone> {
     pub(crate) jni: Option<Box<dyn Jni<T>>>,
     global_ref_pool: SparseList<DvmObject>,
     pub(crate) local_ref_pool: SparseList<DvmObject>,
-    pd: PhantomData<&'a T>
+    pd: PhantomData<&'a T>,
 }
 
 fn NoImplementedHandler<T: Clone>(name: &str, emulator: &AndroidEmulator<T>) -> SvcCallResult {
@@ -82,10 +82,21 @@ fn GetEnv<T: Clone>(name: &str, emulator: &AndroidEmulator<T>) -> SvcCallResult 
         }
 
         if option_env!("PRINT_JNI_CALLS").unwrap_or("") == "1" {
-            println!("{} {}(vm = 0x{:X}, env = 0x{:X}, version = 0x{:x}) => 0x{:X}", Color::Yellow.paint("JNI:"), Color::Blue.paint("GetEnv"), vm, env_pointer, version, env);
+            println!(
+                "{} {}(vm = 0x{:X}, env = 0x{:X}, version = 0x{:x}) => 0x{:X}",
+                Color::Yellow.paint("JNI:"),
+                Color::Blue.paint("GetEnv"),
+                vm,
+                env_pointer,
+                version,
+                env
+            );
         }
 
-        emulator.backend.mem_write(env_pointer, &env.to_le_bytes()).unwrap();
+        emulator
+            .backend
+            .mem_write(env_pointer, &env.to_le_bytes())
+            .unwrap();
     }
 
     SvcCallResult::RET(JNI_OK)
@@ -99,27 +110,54 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
         let java_env = initialize_env(svc_memory);
 
         // DestroyJavaVM
-        let _destroy_java_vm = svc_memory.register_svc(SimpleArm64Svc::new("_DestroyJavaVM", NoImplementedHandler));
+        let _destroy_java_vm =
+            svc_memory.register_svc(SimpleArm64Svc::new("_DestroyJavaVM", NoImplementedHandler));
         // AttachCurrentThread
-        let _attach_current_thread = svc_memory.register_svc(SimpleArm64Svc::new("_AttachCurrentThread", NoImplementedHandler));
+        let _attach_current_thread = svc_memory.register_svc(SimpleArm64Svc::new(
+            "_AttachCurrentThread",
+            NoImplementedHandler,
+        ));
         // DetachCurrentThread
-        let _detach_current_thread = svc_memory.register_svc(SimpleArm64Svc::new("_DetachCurrentThread", NoImplementedHandler));
+        let _detach_current_thread = svc_memory.register_svc(SimpleArm64Svc::new(
+            "_DetachCurrentThread",
+            NoImplementedHandler,
+        ));
         // GetEnv
         let _get_env = svc_memory.register_svc(SimpleArm64Svc::new("_GetEnv", GetEnv));
         // AttachCurrentThreadAsDaemon
-        let _attach_current_thread_as_daemon = svc_memory.register_svc(SimpleArm64Svc::new("_AttachCurrentThreadAsDaemon", NoImplementedHandler));
+        let _attach_current_thread_as_daemon = svc_memory.register_svc(SimpleArm64Svc::new(
+            "_AttachCurrentThreadAsDaemon",
+            NoImplementedHandler,
+        ));
 
         let _jniinvoke_interface = svc_memory.allocate(8 * 8, "_JNIInvokeInterface");
-        _jniinvoke_interface.write_u64_with_offset(8 * 0, 0).expect("write_u64_with_offset failed: reserved0");
-        _jniinvoke_interface.write_u64_with_offset(8 * 1, 0).expect("write_u64_with_offset failed: reserved1");
-        _jniinvoke_interface.write_u64_with_offset(8 * 2, 0).expect("write_u64_with_offset failed: reserved2");
-        _jniinvoke_interface.write_u64_with_offset(8 * 3, _destroy_java_vm).expect("write_u64_with_offset failed: DestroyJavaVM");
-        _jniinvoke_interface.write_u64_with_offset(8 * 4, _attach_current_thread).expect("write_u64_with_offset failed: AttachCurrentThread");
-        _jniinvoke_interface.write_u64_with_offset(8 * 5, _detach_current_thread).expect("write_u64_with_offset failed: DetachCurrentThread");
-        _jniinvoke_interface.write_u64_with_offset(8 * 6, _get_env).expect("write_u64_with_offset failed: GetEnv");
-        _jniinvoke_interface.write_u64_with_offset(8 * 7, _attach_current_thread_as_daemon).expect("write_u64_with_offset failed: AttachCurrentThreadAsDaemon");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 0, 0)
+            .expect("write_u64_with_offset failed: reserved0");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 1, 0)
+            .expect("write_u64_with_offset failed: reserved1");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 2, 0)
+            .expect("write_u64_with_offset failed: reserved2");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 3, _destroy_java_vm)
+            .expect("write_u64_with_offset failed: DestroyJavaVM");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 4, _attach_current_thread)
+            .expect("write_u64_with_offset failed: AttachCurrentThread");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 5, _detach_current_thread)
+            .expect("write_u64_with_offset failed: DetachCurrentThread");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 6, _get_env)
+            .expect("write_u64_with_offset failed: GetEnv");
+        _jniinvoke_interface
+            .write_u64_with_offset(8 * 7, _attach_current_thread_as_daemon)
+            .expect("write_u64_with_offset failed: AttachCurrentThreadAsDaemon");
 
-        java_vm.write_u64_with_offset(0, _jniinvoke_interface.addr)
+        java_vm
+            .write_u64_with_offset(0, _jniinvoke_interface.addr)
             .expect("write_u64_with_offset failed: _jniinvoke_interface");
 
         let dvm = DalvikVM64 {
@@ -131,17 +169,25 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
             jni: None,
             global_ref_pool: SparseList::new(),
             local_ref_pool: SparseList::new(),
-            pd: PhantomData
+            pd: PhantomData,
         };
         emulator.inner_mut().dalvik = Option::from(dvm);
     }
 
-    pub fn load_library(&self, emulator: AndroidEmulator<'a, T>, elf_file_path: &str, force_init: bool) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
+    pub fn load_library(
+        &self,
+        emulator: AndroidEmulator<'a, T>,
+        elf_file_path: &str,
+        force_init: bool,
+    ) -> anyhow::Result<RcUnsafeCell<LinuxModule<'a, T>>> {
         let path = PathBuf::from(elf_file_path);
-        let file_data = fs::read(path)
-            .map_err(|e| anyhow!("unable to read elf file: {}", e))?;
+        let file_data = fs::read(path).map_err(|e| anyhow!("unable to read elf file: {}", e))?;
         let memory = &mut emulator.inner_mut().memory;
-        let library = memory.load_internal(LibraryFile::Elf(ElfLibraryFile::new(file_data, elf_file_path.to_string())), force_init, &emulator);
+        let library = memory.load_internal(
+            LibraryFile::Elf(ElfLibraryFile::new(file_data, elf_file_path.to_string())),
+            force_init,
+            &emulator,
+        );
 
         if std::env::var("RELEASE_CACHED_LIBRARIES").map_or(true, |v| v == "1") {
             memory.release_cached_library();
@@ -150,12 +196,24 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
         library
     }
 
-    pub fn call_jni_onload(&mut self, emulator: AndroidEmulator<'a, T>, module: &LinuxModule<T>) -> anyhow::Result<()> {
+    pub fn call_jni_onload(
+        &mut self,
+        emulator: AndroidEmulator<'a, T>,
+        module: &LinuxModule<T>,
+    ) -> anyhow::Result<()> {
         let jni_onload = module.find_symbol_by_name("JNI_OnLoad", false)?;
         if option_env!("PRINT_JNI_CALLS").unwrap_or("") == "1" {
-            println!("Call Jni_OnLoad for {}, address=0x{:X}, offset=0x{:X}", module.name, jni_onload.address(), jni_onload.value());
+            println!(
+                "Call Jni_OnLoad for {}, address=0x{:X}, offset=0x{:X}",
+                module.name,
+                jni_onload.address(),
+                jni_onload.value()
+            );
         }
-        let ret = jni_onload.call(&emulator, vec![UnicornArg::U64(self.java_vm), UnicornArg::Ptr(0)]);
+        let ret = jni_onload.call(
+            &emulator,
+            vec![UnicornArg::U64(self.java_vm), UnicornArg::Ptr(0)],
+        );
         // release all local ref value
         self.local_ref_pool.clear();
         emulator.inner_mut().memory.release_tmp_memory();
@@ -164,7 +222,12 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
             return Err(anyhow!("Call JNI_OnLoad failed"));
         }
         let version = ret.unwrap();
-        if version != 0x00010001 && version != 0x00010002 && version != 0x00010004 && version != 0x00010006 && version != 0x00010008 {
+        if version != 0x00010001
+            && version != 0x00010002
+            && version != 0x00010004
+            && version != 0x00010006
+            && version != 0x00010008
+        {
             return Err(anyhow!("Call JNI_OnLoad failed: version={:x}", version));
         }
         Ok(())
@@ -179,6 +242,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
 
     /// GetLocalRef by object_id
     pub fn get_local_ref(&self, object_id: i64) -> Option<&DvmObject> {
+        if object_id == 0 {
+            return None;
+        }
         if jni::get_flag_id(object_id) != JNI_FLAG_OBJECT {
             panic!("Invalid object_id: 0x{:X}", object_id);
         }
@@ -188,6 +254,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
     }
 
     pub fn remove_local_ref(&mut self, object_id: i64) {
+        if object_id == 0 {
+            return;
+        }
         let flag = jni::get_flag_id(object_id);
         if flag == JNI_FLAG_CLASS {
             return;
@@ -200,6 +269,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
     }
 
     pub fn get_local_ref_mut(&mut self, object_id: i64) -> Option<&mut DvmObject> {
+        if object_id == 0 {
+            return None;
+        }
         if jni::get_flag_id(object_id) != JNI_FLAG_OBJECT {
             panic!("Invalid object_id: 0x{:X}", object_id);
         }
@@ -216,6 +288,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
     }
 
     pub fn remove_global_ref(&mut self, ref_id: i64) {
+        if ref_id == 0 {
+            return;
+        }
         if jni::get_flag_id(ref_id) != JNI_FLAG_REF {
             panic!("Invalid ref_id: 0x{:X}", ref_id);
         }
@@ -225,6 +300,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
 
     /// GetGlobalRef by ref_id
     pub fn get_global_ref(&self, ref_id: i64) -> Option<&DvmObject> {
+        if ref_id == 0 {
+            return None;
+        }
         if jni::get_flag_id(ref_id) != JNI_FLAG_REF {
             panic!("Invalid ref_id: 0x{:X}", ref_id);
         }
@@ -234,6 +312,9 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
     }
 
     pub fn get_global_ref_mut(&mut self, ref_id: i64) -> Option<&mut DvmObject> {
+        if ref_id == 0 {
+            return None;
+        }
         if jni::get_flag_id(ref_id) != JNI_FLAG_REF {
             panic!("Invalid ref_id: 0x{:X}", ref_id);
         }
@@ -241,7 +322,6 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
         let object = self.global_ref_pool.get_mut(ref_seq as usize)?;
         Some(object)
     }
-
 
     pub fn throw(&mut self, throwable: DvmObject) {
         self.throwable = Option::from(throwable);
@@ -276,21 +356,17 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
         }
         let members = self.members.get(&class);
         if members.is_none() {
-            return None
+            return None;
         }
         let flag = jni::get_flag_id(id);
         if flag != JNI_FLAG_CLASS {
-            return None
+            return None;
         }
         let member_seq = jni::get_member_id(id) as usize;
         let member = members.unwrap().get(member_seq - 1)?;
         match member {
-            DvmMember::Field(_) => {
-                None
-            }
-            DvmMember::Method(method) => {
-                Some(method)
-            }
+            DvmMember::Field(_) => None,
+            DvmMember::Method(method) => Some(method),
         }
     }
 
@@ -300,21 +376,17 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
         }
         let members = self.members.get(&class);
         if members.is_none() {
-            return None
+            return None;
         }
         let flag = jni::get_flag_id(id);
         if flag != JNI_FLAG_CLASS {
-            return None
+            return None;
         }
         let member_seq = jni::get_member_id(id) as usize;
         let member = members.unwrap().get(member_seq - 1)?;
         match member {
-            DvmMember::Field(field) => {
-                Some(field)
-            }
-            DvmMember::Method(_) => {
-                None
-            }
+            DvmMember::Field(field) => Some(field),
+            DvmMember::Method(_) => None,
         }
     }
 
@@ -337,19 +409,35 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
     }
 
     /// Try to construct a DvmClass with parent class information and inherited interfaces, although it is useless!
-    pub fn resolve_class_with_si(&self, name: &str, super_class: Option<Rc<DvmClass>>, interfaces: Option<Vec<Rc<DvmClass>>>) -> Option<(i64, Rc<DvmClass>)> {
+    pub fn resolve_class_with_si(
+        &self,
+        name: &str,
+        super_class: Option<Rc<DvmClass>>,
+        interfaces: Option<Vec<Rc<DvmClass>>>,
+    ) -> Option<(i64, Rc<DvmClass>)> {
         if let Some(ref class_resolver) = self.class_resolver {
             class_resolver.find_class_by_name(name)
         } else {
-            Some((-1, Rc::new(DvmClass::new(-1, name, super_class, interfaces))))
+            Some((
+                -1,
+                Rc::new(DvmClass::new(-1, name, super_class, interfaces)),
+            ))
         }
     }
 
-    pub fn resolve_class_with_si_unchecked(&self, name: &str, super_class: Option<Rc<DvmClass>>, interfaces: Option<Vec<Rc<DvmClass>>>) -> (i64, Rc<DvmClass>) {
+    pub fn resolve_class_with_si_unchecked(
+        &self,
+        name: &str,
+        super_class: Option<Rc<DvmClass>>,
+        interfaces: Option<Vec<Rc<DvmClass>>>,
+    ) -> (i64, Rc<DvmClass>) {
         if let Some(ref class_resolver) = self.class_resolver {
             class_resolver.find_class_by_name(name).unwrap()
         } else {
-            (-1, Rc::new(DvmClass::new(-1, name, super_class, interfaces)))
+            (
+                -1,
+                Rc::new(DvmClass::new(-1, name, super_class, interfaces)),
+            )
         }
     }
 
@@ -365,7 +453,7 @@ impl<'a, T: Clone> DalvikVM64<'a, T> {
 impl<'a, T: Clone> AndroidEmulator<'a, T> {
     /// Create the environment information required by the Android runtime.
     /// This VM serves the subsequent JniCall and JavaCall
-    pub fn get_dalvik_vm(&self) -> & mut DalvikVM64<'a, T> {
+    pub fn get_dalvik_vm(&self) -> &mut DalvikVM64<'a, T> {
         if let Some(vm) = self.inner_mut().dalvik.as_mut() {
             return vm;
         }

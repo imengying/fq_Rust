@@ -1,21 +1,21 @@
-use std::cell::UnsafeCell;
-use std::rc::Rc;
-use std::sync::atomic::AtomicU8;
 use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::OFlag;
+use std::cell::UnsafeCell;
+use std::rc::Rc;
+use std::sync::atomic::AtomicU8;
 
 #[derive(Clone)]
 pub struct Pipe {
     pub buf: Rc<UnsafeCell<Vec<u8>>>,
-    pub count: Rc<AtomicU8>
+    pub count: Rc<AtomicU8>,
 }
 
 impl Pipe {
     pub fn new() -> Self {
         Self {
             buf: Rc::new(UnsafeCell::new(Vec::new())),
-            count: Rc::new(AtomicU8::new(0))
+            count: Rc::new(AtomicU8::new(0)),
         }
     }
 }

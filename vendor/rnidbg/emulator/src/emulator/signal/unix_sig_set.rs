@@ -1,14 +1,12 @@
 use crate::emulator::signal::SigSet;
 
 pub struct UnixSigSet {
-    pub mask: u64
+    pub mask: u64,
 }
 
 impl UnixSigSet {
     pub fn new(mask: u64) -> Self {
-        Self {
-            mask
-        }
+        Self { mask }
     }
 
     pub fn iter(&self) -> SigSetIterator {

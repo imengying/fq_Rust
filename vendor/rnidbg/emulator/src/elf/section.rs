@@ -1,16 +1,16 @@
-use std::cell::UnsafeCell;
-use std::rc::Rc;
-use anyhow::anyhow;
+use crate::elf::abi::*;
 use crate::elf::dynamic_struct::ElfDynamicStructure;
 use crate::elf::hash_tab::ElfHashTable;
-use crate::elf::memorized_object::{MemoizedObject};
+use crate::elf::init_array::ElfInitArray;
+use crate::elf::memorized_object::MemoizedObject;
 use crate::elf::parser::{ElfFile, ElfParser};
+use crate::elf::relocation::ElfRelocation;
 use crate::elf::str_tab::ElfStringTable;
 use crate::elf::symbol::ElfSymbol;
-use crate::elf::abi::{*};
-use crate::elf::init_array::ElfInitArray;
-use crate::elf::relocation::ElfRelocation;
 use crate::elf::symbol_structure::SymbolLocator;
+use anyhow::anyhow;
+use std::cell::UnsafeCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum ElfSectionData {
@@ -21,7 +21,7 @@ pub enum ElfSectionData {
     Relocations(Vec<MemoizedObject<ElfRelocation>>),
     InitArray(MemoizedObject<ElfInitArray>),
     PreInitArray(MemoizedObject<ElfInitArray>),
-    Unknown()
+    Unknown(),
 }
 
 #[derive(Clone)]
@@ -39,7 +39,6 @@ pub struct ElfSection {
     pub data: ElfSectionData,
 }
 
-
 impl ElfSection {
     pub fn new(elf_file: Rc<UnsafeCell<ElfFile>>, parser: ElfParser, offset: usize) -> Self {
         parser.seek(offset);
@@ -56,9 +55,16 @@ impl ElfSection {
         let entsize = parser.read_int_or_long();
 
         let mut section = ElfSection {
-            name_ndx, typ, flags, addr,
+            name_ndx,
+            typ,
+            flags,
+            addr,
             section_offset: section_offset as usize,
-            size, link, info, addralign, entsize,
+            size,
+            link,
+            info,
+            addralign,
+            entsize,
             data: ElfSectionData::Unknown(),
         };
 
@@ -70,7 +76,11 @@ impl ElfSection {
                     let cloned_parser = parser.clone();
                     let mut symbols = vec![];
                     symbols.push(MemoizedObject::new(move || {
-                        Ok(ElfSymbol::new(cloned_parser.clone(), symbol_offset as usize, typ as i32))
+                        Ok(ElfSymbol::new(
+                            cloned_parser.clone(),
+                            symbol_offset as usize,
+                            typ as i32,
+                        ))
                     }));
                     section.data = ElfSectionData::Symbols(symbols);
                 }
@@ -78,20 +88,33 @@ impl ElfSection {
             SHT_STRTAB => {
                 let cloned_parser = parser.clone();
                 section.data = ElfSectionData::StringTable(MemoizedObject::new(move || {
-                    Ok(ElfStringTable::new(cloned_parser.clone(), section_offset as usize, size as usize))
+                    Ok(ElfStringTable::new(
+                        cloned_parser.clone(),
+                        section_offset as usize,
+                        size as usize,
+                    ))
                 }));
             }
             SHT_HASH => {
                 let cloned_parser = parser.clone();
                 section.data = ElfSectionData::HashTable(MemoizedObject::new(move || {
-                    Ok(ElfHashTable::new(cloned_parser.clone(), section_offset as usize, size as usize))
+                    Ok(ElfHashTable::new(
+                        cloned_parser.clone(),
+                        section_offset as usize,
+                        size as usize,
+                    ))
                 }));
             }
             SHT_DYNAMIC => {
                 let cloned_parser = parser.clone();
                 let elf_file_c = elf_file.clone();
                 section.data = ElfSectionData::DynamicStructure(MemoizedObject::new(move || {
-                    Ok(ElfDynamicStructure::new(elf_file_c.clone(), cloned_parser.clone(), section_offset as usize, size as usize))
+                    Ok(ElfDynamicStructure::new(
+                        elf_file_c.clone(),
+                        cloned_parser.clone(),
+                        section_offset as usize,
+                        size as usize,
+                    ))
                 }));
             }
             SHT_RELA | SHT_REL => {
@@ -102,10 +125,16 @@ impl ElfSection {
                     let elf_file = elf_file.clone();
                     let mut relocations = vec![];
                     relocations.push(MemoizedObject::new(move || {
-                        let symtab = unsafe { &*elf_file.get() }.get_section(link as usize)
+                        let symtab = unsafe { &*elf_file.get() }
+                            .get_section(link as usize)
                             .expect("Failed to get section from link");
 
-                        Ok(ElfRelocation::new(cloned_parser.clone(), relocation_offset as usize, entsize as u32, SymbolLocator::Section(symtab.clone())))
+                        Ok(ElfRelocation::new(
+                            cloned_parser.clone(),
+                            relocation_offset as usize,
+                            entsize as u32,
+                            SymbolLocator::Section(symtab.clone()),
+                        ))
                     }));
                     section.data = ElfSectionData::Relocations(relocations);
                 }
@@ -113,13 +142,21 @@ impl ElfSection {
             SHT_INIT_ARRAY => {
                 let cloned_parser = parser.clone();
                 section.data = ElfSectionData::InitArray(MemoizedObject::new(move || {
-                    Ok(ElfInitArray::new(cloned_parser.clone(), section_offset as usize, size as usize))
+                    Ok(ElfInitArray::new(
+                        cloned_parser.clone(),
+                        section_offset as usize,
+                        size as usize,
+                    ))
                 }));
             }
             SHT_PREINIT_ARRAY => {
                 let cloned_parser = parser.clone();
                 section.data = ElfSectionData::PreInitArray(MemoizedObject::new(move || {
-                    Ok(ElfInitArray::new(cloned_parser.clone(), section_offset as usize, size as usize))
+                    Ok(ElfInitArray::new(
+                        cloned_parser.clone(),
+                        section_offset as usize,
+                        size as usize,
+                    ))
                 }));
             }
 
@@ -135,11 +172,15 @@ impl ElfSection {
                 let symbol = symbols[index as usize].get_value()?;
                 Ok(symbol)
             }
-            _ => return Err(anyhow!("Section is not a symbol table"))
+            _ => return Err(anyhow!("Section is not a symbol table")),
         }
     }
 
-    pub fn get_elf_symbol_by_name(&self, name: &str, elf_file: &ElfFile) -> anyhow::Result<ElfSymbol> {
+    pub fn get_elf_symbol_by_name(
+        &self,
+        name: &str,
+        elf_file: &ElfFile,
+    ) -> anyhow::Result<ElfSymbol> {
         match self.data {
             ElfSectionData::Symbols(ref symbols) => {
                 for i in 0..symbols.len() {
@@ -149,7 +190,7 @@ impl ElfSection {
                     }
                 }
             }
-            _ => return Err(anyhow!("Section is not a symbol table"))
+            _ => return Err(anyhow!("Section is not a symbol table")),
         }
         Err(anyhow!("Failed to get symbol by name"))
     }
@@ -159,12 +200,14 @@ impl ElfSection {
             ElfSectionData::Symbols(ref symbols) => {
                 for i in 0..symbols.len() {
                     let symbol = symbols[i].get_value()?;
-                    if so_addr >= symbol.value as u64 && so_addr < (symbol.value + symbol.size) as u64 {
+                    if so_addr >= symbol.value as u64
+                        && so_addr < (symbol.value + symbol.size) as u64
+                    {
                         return Ok(symbol);
                     }
                 }
             }
-            _ => return Err(anyhow!("Section is not a symbol table"))
+            _ => return Err(anyhow!("Section is not a symbol table")),
         }
         Err(anyhow!("Failed to get symbol by name"))
     }

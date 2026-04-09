@@ -1,9 +1,9 @@
 mod arm;
 
+use bytes::Buf;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use bytes::{Buf};
 
-pub use arm::{*};
+pub use arm::*;
 
 const ALIGN_SIZE_BASE: usize = 0x10;
 
@@ -30,7 +30,7 @@ pub fn align_addr(addr: u64, size: u64, alignment: i64) -> Alignment {
         address: addr as u64,
         size: size as usize,
         begin: 0,
-        data_size: 0
+        data_size: 0,
     }
 }
 
@@ -47,7 +47,6 @@ pub fn get_segment_protection(flags: u32) -> u32 {
     }
     prot
 }
-
 
 pub fn calculate_hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();

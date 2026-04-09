@@ -1,23 +1,24 @@
 use crate::emulator::{AndroidEmulator, VMPointer};
 use crate::linux::errno::Errno;
 use crate::linux::file_system::{FileIO, FileIOTrait, SeekResult, StMode};
-use crate::linux::structs::OFlag;
 use crate::linux::structs::socket::Pf;
+use crate::linux::structs::OFlag;
 
-pub struct LocalSocket {
-
-}
+pub struct LocalSocket {}
 
 impl LocalSocket {
     pub fn new() -> Self {
-        LocalSocket {
-
-        }
+        LocalSocket {}
     }
 }
 
 impl<T: Clone> FileIOTrait<T> for LocalSocket {
-    fn connect(&mut self, addr: VMPointer<T>, addr_len: usize, emulator: &AndroidEmulator<T>) -> i32 {
+    fn connect(
+        &mut self,
+        addr: VMPointer<T>,
+        addr_len: usize,
+        emulator: &AndroidEmulator<T>,
+    ) -> i32 {
         let sa_family = emulator.backend.mem_read_v2::<u16>(addr.addr).unwrap();
         if sa_family != (Pf::LOCAL as u32) as u16 {
             emulator.set_errno(Errno::EINVAL.as_i32()).unwrap();

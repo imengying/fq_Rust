@@ -1,23 +1,23 @@
-mod tests;
 mod allocator;
+mod tests;
 
-use std::cell::UnsafeCell;
-use std::collections::HashMap;
-use std::process::id;
+use crate::backend::Permission;
+use crate::emulator::consts::MMAP_BASE;
+use crate::emulator::{syscall_handler, AndroidEmulator};
+use crate::linux::errno::Errno;
+use crate::linux::file_system::{FileIO, FileIOTrait, StMode};
+use crate::linux::structs::OFlag;
+use crate::linux::symbol::{LinuxSymbol, ModuleSymbol};
+use crate::linux::PAGE_ALIGN;
+use crate::memory::AndroidElfLoader;
+use crate::pointer::VMPointer;
+use crate::tool::UnicornArg;
 use anyhow::anyhow;
 use bitflags::Flags;
 use log::{info, warn};
-use crate::backend::Permission;
-use crate::emulator::{AndroidEmulator, syscall_handler};
-use crate::emulator::consts::MMAP_BASE;
-use crate::linux::errno::Errno;
-use crate::linux::file_system::{FileIO, FileIOTrait, StMode};
-use crate::linux::PAGE_ALIGN;
-use crate::linux::structs::OFlag;
-use crate::linux::symbol::{LinuxSymbol, ModuleSymbol};
-use crate::memory::AndroidElfLoader;
-use crate::pointer::VMPointer;
-use crate::tool::{UnicornArg};
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
+use std::process::id;
 
 const MAP_FAILED: i64 = -1;
 const MAP_FIXED: i32 = 0x10;
@@ -29,7 +29,7 @@ pub struct MemoryMap {
     pub size: usize,
     pub prot: u32,
     pub name: Option<String>,
-    pub from_file: bool
+    pub from_file: bool,
 }
 
 impl MemoryMap {
@@ -39,7 +39,7 @@ impl MemoryMap {
             size,
             prot,
             name: None,
-            from_file: false
+            from_file: false,
         }
     }
 
@@ -49,7 +49,7 @@ impl MemoryMap {
             size,
             prot,
             name: Some(name),
-            from_file: false
+            from_file: false,
         }
     }
 
@@ -59,7 +59,7 @@ impl MemoryMap {
             size,
             prot,
             name: None,
-            from_file: true
+            from_file: true,
         }
     }
 }
@@ -73,7 +73,7 @@ pub trait MemoryBlockTrait<'a, T: Clone> {
 pub struct MemoryBlock<'a, T: Clone> {
     pub pointer: VMPointer<'a, T>,
     pub libc: bool,
-    pub free: Option<LinuxSymbol>
+    pub free: Option<LinuxSymbol>,
 }
 
 impl<'a, T: Clone> MemoryBlockTrait<'a, T> for MemoryBlock<'a, T> {
@@ -91,7 +91,8 @@ impl<'a, T: Clone> MemoryBlockTrait<'a, T> for MemoryBlock<'a, T> {
             }
         } else {
             if let Some(emu) = emu {
-                emu.munmap(self.pointer.addr, self.pointer.size as u64).unwrap();
+                emu.munmap(self.pointer.addr, self.pointer.size as u64)
+                    .unwrap();
             } else {
                 warn!("free memory block failed: AndroidEmulator not found")
             }
@@ -106,19 +107,20 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
             Ok(MemoryBlock {
                 pointer: ptr,
                 libc: false,
-                free: None
+                free: None,
             })
         } else {
             let memory = &mut self.inner_mut().memory;
             let malloc = memory.malloc.as_ref().unwrap();
             let free = memory.free.as_ref().unwrap();
-            let ptr = malloc.call(self, vec![UnicornArg::U64(size as u64)])
+            let ptr = malloc
+                .call(self, vec![UnicornArg::U64(size as u64)])
                 .ok_or(anyhow!("malloc failed"))?;
             let ptr: VMPointer<'a, T> = VMPointer::new(ptr, size, self.backend.clone());
             Ok(MemoryBlock {
                 pointer: ptr,
                 libc: true,
-                free: Some(free.clone())
+                free: Some(free.clone()),
             })
         }
     }
@@ -127,7 +129,10 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         let (pointer, size) = self.mmap(size, (Permission::READ | Permission::WRITE).bits())?;
 
         if temp_mem {
-            self.inner_mut().memory.temp_memory.insert(pointer.addr, size);
+            self.inner_mut()
+                .memory
+                .temp_memory
+                .insert(pointer.addr, size);
         }
 
         Ok(pointer)
@@ -170,8 +175,7 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
             addr += PAGE_ALIGN as u64;
         }
 
-        self.inner_mut().memory
-            .set_mmap_base(addr + length as u64);
+        self.inner_mut().memory.set_mmap_base(addr + length as u64);
 
         addr
     }
@@ -188,7 +192,10 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         }
         let base = self.inner_mut().memory.mmap_base;
         if option_env!("PRINT_MMAP_LOG") == Some("1") {
-            println!("mmap addr=0x{:X}, mmap_base_address=0x{:X}, length={}, prot={}", addr, base, length, prot);
+            println!(
+                "mmap addr=0x{:X}, mmap_base_address=0x{:X}, length={}, prot={}",
+                addr, base, length, prot
+            );
         }
 
         let mut pointer = VMPointer::new(addr, 0, self.backend.clone());
@@ -197,20 +204,38 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         Ok((pointer, aligned))
     }
 
-    pub fn mmap2(&self, start: u64, length: usize, prot: u32, flags: u32, fd: i32, offset: i64) -> anyhow::Result<(Errno, u64)> {
+    pub fn mmap2(
+        &self,
+        start: u64,
+        length: usize,
+        prot: u32,
+        flags: u32,
+        fd: i32,
+        offset: i64,
+    ) -> anyhow::Result<(Errno, u64)> {
         let aligned = ((length - 1) / PAGE_ALIGN + 1) * PAGE_ALIGN;
-        let is_anonymous = (flags as i32 & MAP_ANONYMOUS) != 0 || (start == 0 && fd <= 0 && offset == 0);
+        let is_anonymous =
+            (flags as i32 & MAP_ANONYMOUS) != 0 || (start == 0 && fd <= 0 && offset == 0);
 
         if (flags as i32 & MAP_FIXED) != 0 && is_anonymous {
             if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                println!("mmap2 MAP_FIXED start=0x{:X}, length={}, prot={:?}", start, length, prot);
+                println!(
+                    "mmap2 MAP_FIXED start=0x{:X}, length={}, prot={:?}",
+                    start, length, prot
+                );
             }
 
             self.munmap(start, length as u64)?;
-            self.backend.mem_map(start, aligned, prot).map_err(|e| anyhow!("mmap2 failed: {:?}", e))?;
+            self.backend
+                .mem_map(start, aligned, prot)
+                .map_err(|e| anyhow!("mmap2 failed: {:?}", e))?;
 
             let memory = &mut self.inner_mut().memory;
-            if memory.memory_map.insert(start, MemoryMap::new(start, aligned, prot)).is_some() {
+            if memory
+                .memory_map
+                .insert(start, MemoryMap::new(start, aligned, prot))
+                .is_some()
+            {
                 warn!("mmap2 replace exists memory map: start=0x{:X}", start);
             }
 
@@ -224,11 +249,16 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                 println!("mmap2 addr=0x{:X}, mmap_base_address=0x{:X}, start=0x{:X}, fd={}, offset={}, aligned={}, LR=0x{:X}", addr, base, start, fd, offset, aligned, self.get_lr()?);
             }
 
-            self.backend.mem_map(addr, aligned, prot)
+            self.backend
+                .mem_map(addr, aligned, prot)
                 .map_err(|e| anyhow!("mmap2 failed: {:?}", e))?;
 
             let memory = &mut self.inner_mut().memory;
-            if memory.memory_map.insert(addr, MemoryMap::new(addr, aligned, prot)).is_some() {
+            if memory
+                .memory_map
+                .insert(addr, MemoryMap::new(addr, aligned, prot))
+                .is_some()
+            {
                 warn!("mmap2 replace exists memory map: addr=0x{:X}", addr);
             }
 
@@ -244,7 +274,7 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                     FileIO::Error(_) => return Ok((Errno::ENODEV, 0)),
                     FileIO::Dynamic(file) => file.oflags(),
                     FileIO::Direction(_) => unreachable!(),
-                    FileIO::LocalSocket(_) => unreachable!()
+                    FileIO::LocalSocket(_) => unreachable!(),
                 };
                 if prot & (Permission::WRITE.bits()) != 0 {
                     if !oflags.contains(OFlag::O_RDWR) && !oflags.contains(OFlag::O_WRONLY) {
@@ -265,16 +295,41 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                         println!("mmap2 addr=0x{:X}, mmap_base_address=0x{:X}, start=0x{:X}, fd={}, offset={}, aligned={}, LR={:X}",addr, base, start, fd, offset, aligned, self.get_lr()?);
                     }
                     let ret = match file {
-                        FileIO::Bytes(file) => file.mmap(self, addr, aligned as i32, prot, offset as u32, length as u64)?,
+                        FileIO::Bytes(file) => file.mmap(
+                            self,
+                            addr,
+                            aligned as i32,
+                            prot,
+                            offset as u32,
+                            length as u64,
+                        )?,
                         FileIO::Error(_) => panic!("mmap2 failed, file not found"),
-                        FileIO::File(file) => file.mmap(self, addr, aligned as i32, prot, offset as u32, length as u64)?,
-                        FileIO::Dynamic(file) => file.mmap(self, addr, aligned as i32, prot, offset as u32, length as u64)?,
+                        FileIO::File(file) => file.mmap(
+                            self,
+                            addr,
+                            aligned as i32,
+                            prot,
+                            offset as u32,
+                            length as u64,
+                        )?,
+                        FileIO::Dynamic(file) => file.mmap(
+                            self,
+                            addr,
+                            aligned as i32,
+                            prot,
+                            offset as u32,
+                            length as u64,
+                        )?,
                         FileIO::Direction(_) => unreachable!(),
-                        FileIO::LocalSocket(_) => unreachable!()
+                        FileIO::LocalSocket(_) => unreachable!(),
                     };
 
                     let memory = &mut self.inner_mut().memory;
-                    if memory.memory_map.insert(addr, MemoryMap::new_from_file(addr, aligned, prot)).is_some() {
+                    if memory
+                        .memory_map
+                        .insert(addr, MemoryMap::new_from_file(addr, aligned, prot))
+                        .is_some()
+                    {
                         warn!("mmap2 replace exists memory map: addr=0x{:X}", addr);
                     }
 
@@ -294,26 +349,54 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
 
                 //let ret = file.mmap(self, start, aligned as i32, prot, offset as u32, length as u64)?;
                 let ret = match file {
-                    FileIO::Bytes(file) => file.mmap(self, start, aligned as i32, prot, offset as u32, length as u64)?,
+                    FileIO::Bytes(file) => file.mmap(
+                        self,
+                        start,
+                        aligned as i32,
+                        prot,
+                        offset as u32,
+                        length as u64,
+                    )?,
                     FileIO::Error(_) => panic!("mmap2 failed, file not found"),
-                    FileIO::File(file) => file.mmap(self, start, aligned as i32, prot, offset as u32, length as u64)?,
-                    FileIO::Dynamic(file) => file.mmap(self, start, aligned as i32, prot, offset as u32, length as u64)?,
+                    FileIO::File(file) => file.mmap(
+                        self,
+                        start,
+                        aligned as i32,
+                        prot,
+                        offset as u32,
+                        length as u64,
+                    )?,
+                    FileIO::Dynamic(file) => file.mmap(
+                        self,
+                        start,
+                        aligned as i32,
+                        prot,
+                        offset as u32,
+                        length as u64,
+                    )?,
                     FileIO::Direction(_) => unreachable!(),
-                    FileIO::LocalSocket(_) => unreachable!()
+                    FileIO::LocalSocket(_) => unreachable!(),
                 };
 
                 let memory = &mut self.inner_mut().memory;
-                if memory.memory_map.insert(start, MemoryMap::new_from_file(start, aligned, prot)).is_some() {
+                if memory
+                    .memory_map
+                    .insert(start, MemoryMap::new_from_file(start, aligned, prot))
+                    .is_some()
+                {
                     warn!("mmap2 replace exists memory map: start=0x{:X}", start);
                 }
 
                 Ok((Errno::OK, ret))
             } else {
                 Ok((Errno::EBADF, 0))
-            }
+            };
         }
 
-        warn!("mmap2 failed, start=0x{:X}, length={}, prot={:?}, flags=0x{:X}, fd={}, offset={}", start, length, prot, flags, fd, offset);
+        warn!(
+            "mmap2 failed, start=0x{:X}, length={}, prot={:?}, flags=0x{:X}, fd={}, offset={}",
+            start, length, prot, flags, fd, offset
+        );
 
         Ok((Errno::ENODEV, 0))
     }
@@ -323,9 +406,9 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
         fn find_segment(mem_map: &HashMap<u64, MemoryMap>, start: u64) -> Option<(u64, MemoryMap)> {
             let mut segment = None;
             for (key, value) in mem_map.iter() {
-                if start >*key && start < value.base + value.size as u64 {
+                if start > *key && start < value.base + value.size as u64 {
                     segment = Some((*key, value.clone()));
-                    break
+                    break;
                 }
             }
             segment
@@ -337,7 +420,10 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
             if msg.contains("NOMEM") {
                 // Linux allows munmap on already-unmapped pages; treat as non-fatal.
                 if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                    eprintln!("munmap ignore backend NOMEM: start=0x{:X}, aligned=0x{:X}", start, aligned);
+                    eprintln!(
+                        "munmap ignore backend NOMEM: start=0x{:X}, aligned=0x{:X}",
+                        start, aligned
+                    );
                 }
             } else {
                 return Err(anyhow!("munmap failed: {:?}", e));
@@ -355,35 +441,64 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
             }
             let sg = sg.unwrap().1;
             if sg.size < aligned {
-                return Err(anyhow!("munmap failed, start=0x{:X}, size={}, aligned={}", start, sg.size, aligned));
+                return Err(anyhow!(
+                    "munmap failed, start=0x{:X}, size={}, aligned={}",
+                    start,
+                    sg.size,
+                    aligned
+                ));
             }
 
             if (start + aligned as u64) < (sg.base + sg.size as u64) {
                 let new_size = sg.base + sg.size as u64 - start - aligned as u64;
                 if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                    println!("munmap aligned=0x{:X}, start=0x{:X}, base=0x{:X}, size={}", aligned, start, start + aligned as u64, new_size);
+                    println!(
+                        "munmap aligned=0x{:X}, start=0x{:X}, base=0x{:X}, size={}",
+                        aligned,
+                        start,
+                        start + aligned as u64,
+                        new_size
+                    );
                 }
 
-                if mem_map.insert(start + aligned as u64, MemoryMap::new(start + aligned as u64, new_size as usize, sg.prot)).is_some() {
+                if mem_map
+                    .insert(
+                        start + aligned as u64,
+                        MemoryMap::new(start + aligned as u64, new_size as usize, sg.prot),
+                    )
+                    .is_some()
+                {
                     if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                        eprintln!("munmap replace exists memory map addr=0x{:X}", start + aligned as u64);
+                        eprintln!(
+                            "munmap replace exists memory map addr=0x{:X}",
+                            start + aligned as u64
+                        );
                     }
                 }
             }
 
-            if mem_map.insert(sg.base, MemoryMap::new(sg.base, (start -  sg.base) as usize, sg.prot)).is_none() {
+            if mem_map
+                .insert(
+                    sg.base,
+                    MemoryMap::new(sg.base, (start - sg.base) as usize, sg.prot),
+                )
+                .is_none()
+            {
                 if option_env!("PRINT_MMAP_LOG") == Some("1") {
                     eprintln!("munmap replace failed warning: addr=0x{:X}", sg.base);
                 }
             }
 
-            return Ok(())
+            return Ok(());
         }
         let removed = removed.unwrap();
         if removed.size != aligned {
             if aligned >= removed.size {
                 if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                    println!("munmap removed=0x{:X}, aligned=0x{:X}, start=0x{:X}", removed.size, aligned, start);
+                    println!(
+                        "munmap removed=0x{:X}, aligned=0x{:X}, start=0x{:X}",
+                        removed.size, aligned, start
+                    );
                 }
 
                 let mut address = start + removed.size as u64;
@@ -400,20 +515,36 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                 return Ok(());
             }
 
-            if memory.memory_map.insert(start + aligned as u64, MemoryMap::new(start + aligned as u64, removed.size - aligned, removed.prot)).is_none() {
+            if memory
+                .memory_map
+                .insert(
+                    start + aligned as u64,
+                    MemoryMap::new(start + aligned as u64, removed.size - aligned, removed.prot),
+                )
+                .is_none()
+            {
                 if option_env!("PRINT_MMAP_LOG") == Some("1") {
                     eprintln!("munmap replace failed warning: addr=0x{:X}", start);
                 }
             }
 
             if option_env!("PRINT_MMAP_LOG") == Some("1") {
-                println!("munmap removed=0x{:X}, aligned=0x{:X}, base=0x{:X}, size={}", removed.size, aligned, start + aligned as u64, removed.size - aligned);
+                println!(
+                    "munmap removed=0x{:X}, aligned=0x{:X}, base=0x{:X}, size={}",
+                    removed.size,
+                    aligned,
+                    start + aligned as u64,
+                    removed.size - aligned
+                );
             }
 
             return Ok(());
         }
         if option_env!("PRINT_MMAP_LOG") == Some("1") {
-            println!("munmap aligned=0x{:X}, start=0x{:X}, base=0x{:X}, size={}", aligned, start, removed.base, removed.size);
+            println!(
+                "munmap aligned=0x{:X}, start=0x{:X}, base=0x{:X}, size={}",
+                aligned, start, removed.base, removed.size
+            );
         }
         if memory.memory_map.is_empty() {
             memory.set_mmap_base(MMAP_BASE);

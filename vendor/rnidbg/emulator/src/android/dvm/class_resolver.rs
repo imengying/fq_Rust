@@ -1,7 +1,7 @@
+use crate::android::dvm::class::DvmClass;
+use crate::android::jni::generate_class_id;
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::android::dvm::class::DvmClass;
-use crate::android::jni::{generate_class_id};
 
 pub struct ClassResolver {
     class_map: HashMap<i64, Rc<DvmClass>>,
@@ -44,9 +44,7 @@ impl ClassResolver {
     ///    "java/lang/Object",
     ///    "java/lang/String",
     /// ]);
-    pub fn new(
-        mut class_list: Vec<&str>
-    ) -> Self {
+    pub fn new(mut class_list: Vec<&str>) -> Self {
         class_list.push("java/lang/NoSuchFieldError");
         class_list.push("java/lang/NoSuchMethodError");
         class_list.push("java/lang/NoClassDefFoundError");
@@ -79,9 +77,7 @@ impl ClassResolver {
             map.insert(id, Rc::new(DvmClass::new_class(id, dvm_class)));
             seq += 1;
         }
-        ClassResolver {
-            class_map: map,
-        }
+        ClassResolver { class_map: map }
     }
 
     /*/// I don't recommend this method at all!

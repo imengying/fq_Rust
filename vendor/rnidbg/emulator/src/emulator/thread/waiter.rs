@@ -1,12 +1,12 @@
-use std::marker::PhantomData;
+use crate::emulator::signal::SignalTask;
 use crate::emulator::AndroidEmulator;
-use crate::emulator::signal::{SignalTask};
 use crate::linux::thread::{FutexIndefinitelyWaiter, FutexNanoSleepWaiter};
+use std::marker::PhantomData;
 
 pub enum Waiter<'a, T: Clone> {
     FutexIndefinite(FutexIndefinitelyWaiter<'a, T>),
     FutexNanoSleep(FutexNanoSleepWaiter<'a, T>),
-    Unknown(PhantomData<&'a T>)
+    Unknown(PhantomData<&'a T>),
 }
 
 pub trait WaiterTrait<'a, T: Clone> {

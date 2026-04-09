@@ -1,4 +1,3 @@
-
 use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode, SEEK_CUR, SEEK_END, SEEK_SET};
 use crate::linux::structs::OFlag;
@@ -7,7 +6,7 @@ pub struct RandomBootId {
     pub path: String,
     pub oflags: u32,
     pub data: String,
-    pub pos: usize
+    pub pos: usize,
 }
 
 impl RandomBootId {
@@ -25,7 +24,7 @@ impl RandomBootId {
             path: path.to_string(),
             oflags,
             data,
-            pos: 0
+            pos: 0,
         }
     }
 }
@@ -81,7 +80,8 @@ impl<T: Clone> FileIOTrait<T> for RandomBootId {
             return 0;
         }
         let len = std::cmp::min(count, self.data.len() - offset);
-        buf.write_data(&self.data.as_bytes()[offset..offset + len]).unwrap();
+        buf.write_data(&self.data.as_bytes()[offset..offset + len])
+            .unwrap();
         len
     }
 
@@ -108,7 +108,7 @@ impl<T: Clone> FileIOTrait<T> for RandomBootId {
                 self.pos = pos + offset as usize;
                 self.pos as i64
             }
-            _ => return SeekResult::WhenceError
+            _ => return SeekResult::WhenceError,
         })
     }
 

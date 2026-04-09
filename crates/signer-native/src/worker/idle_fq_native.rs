@@ -6,11 +6,12 @@ use emulator::android::dvm::object::DvmObject;
 use emulator::android::dvm::DalvikVM64;
 use emulator::android::jni::{Jni, JniValue, MethodAcc, VaList};
 use emulator::android::virtual_library::libc::Libc;
-use emulator::AndroidEmulator;
+use emulator::keystone;
 use emulator::linux::file_system::{FileIO, StMode};
 use emulator::linux::fs::direction::Direction;
 use emulator::linux::fs::linux_file::LinuxFileIO;
 use emulator::memory::svc_memory::{SimpleArm64Svc, SvcCallResult};
+use emulator::AndroidEmulator;
 use emulator::UnicornArg;
 use log::info;
 use std::any::Any;
@@ -39,6 +40,8 @@ const ANDROID_TARGET_SDK: i64 = 23;
 const LOADER_SHARED_GLOBALS_SIZE: usize = 0x1000;
 const LOADER_TLS_DTOR_LIST_OFFSET: u64 = 0x418;
 const LOADER_TLS_DTOR_LIST_SIZE: usize = 0x100;
+const LIBMETASEC_ALLOC_WRAPPER_OFFSET: u64 = 0x24e4f8;
+const LIBMETASEC_ALLOC_DIRECT_OFFSET: u64 = 0x32fa0;
 
 const MS_METHOD_DATA_PATH: i32 = 65539;
 const MS_METHOD_BOOL_1: i32 = 33554433;
@@ -129,19 +132,27 @@ impl IdleFqNative {
             ms_cert_data: resources.ms_cert_data.clone(),
         }));
 
-        let _ = vm.load_library(emulator.clone(), resources.so_c_share_file.to_string_lossy().as_ref(), false)?;
+        let _ = vm.load_library(
+            emulator.clone(),
+            resources.so_c_share_file.to_string_lossy().as_ref(),
+            false,
+        )?;
         let module = vm.load_library(
             emulator.clone(),
             resources.so_metasec_file.to_string_lossy().as_ref(),
             true,
         )?;
-        vm.call_jni_onload(emulator.clone(), unsafe { &*module.get() })?;
+        let module_base = unsafe { &*module.get() }.base;
+        patch_libmetasec_runtime(&emulator, module_base)?;
+        if std::env::var("FQ_SKIP_JNI_ONLOAD").ok().as_deref() != Some("1") {
+            vm.call_jni_onload(emulator.clone(), unsafe { &*module.get() })?;
+        }
 
         info!("rust native signer initialized");
         Ok(Self {
             loggable,
             emulator,
-            module_base: unsafe { &*module.get() }.base,
+            module_base,
         })
     }
 
@@ -341,11 +352,17 @@ impl FqJni {
     fn handle_ms_method(&self, method_id: i32) -> JniValue {
         match method_id {
             MS_METHOD_DATA_PATH => MSDATA_VFS_PATH.to_string().into(),
-            MS_METHOD_BOOL_1 | MS_METHOD_BOOL_2 => object_data(self.classes.boolean.clone(), true).into(),
-            MS_METHOD_VERSION_CODE => object_data(self.classes.integer.clone(), APP_VERSION_CODE).into(),
+            MS_METHOD_BOOL_1 | MS_METHOD_BOOL_2 => {
+                object_data(self.classes.boolean.clone(), true).into()
+            }
+            MS_METHOD_VERSION_CODE => {
+                object_data(self.classes.integer.clone(), APP_VERSION_CODE).into()
+            }
             MS_METHOD_VERSION_NAME => "6.8.1.32".to_string().into(),
             MS_METHOD_CERT => self.ms_cert_data.clone().into(),
-            MS_METHOD_NOW_MS => object_data(self.classes.long.clone(), current_time_millis()).into(),
+            MS_METHOD_NOW_MS => {
+                object_data(self.classes.long.clone(), current_time_millis()).into()
+            }
             _ => JniValue::Null,
         }
     }
@@ -444,10 +461,7 @@ fn resolve_resources(apk_path: Option<String>, resource_root: &str) -> Result<Re
     let ms_cert_file = base.join(MS_CERT_FILE_PATH);
     let ms_cert_data = std::fs::read(&ms_cert_file)?;
 
-    let root = std::env::temp_dir().join(format!(
-        "fq_rnidbg_{}",
-        current_time_millis()
-    ));
+    let root = std::env::temp_dir().join(format!("fq_rnidbg_{}", current_time_millis()));
     let msdata_dir = root.join("data/user/0").join(PACKAGE_NAME).join("files");
     std::fs::create_dir_all(&msdata_dir)?;
     std::fs::create_dir_all(root.join("data/system"))?;
@@ -540,11 +554,17 @@ fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
     );
     symbol.insert(
         "__loader_add_thread_local_dtor".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("__loader_add_thread_local_dtor", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_add_thread_local_dtor",
+            ret_zero,
+        )),
     );
     symbol.insert(
         "__loader_remove_thread_local_dtor".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("__loader_remove_thread_local_dtor", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "__loader_remove_thread_local_dtor",
+            ret_zero,
+        )),
     );
     symbol.insert(
         "__loader_android_get_exported_namespace".to_string(),
@@ -590,10 +610,7 @@ fn register_ld_android(emulator: &mut AndroidEmulator<'static, ()>) {
     );
     symbol.insert(
         "__loader_android_dlopen_ext".to_string(),
-        svc.register_svc(SimpleArm64Svc::new(
-            "__loader_android_dlopen_ext",
-            ret_zero,
-        )),
+        svc.register_svc(SimpleArm64Svc::new("__loader_android_dlopen_ext", ret_zero)),
     );
     symbol.insert(
         "__loader_android_get_application_target_sdk_version".to_string(),
@@ -616,7 +633,10 @@ fn register_libandroid(emulator: &mut AndroidEmulator<'static, ()>) {
     let mut symbol = HashMap::new();
     symbol.insert(
         "ASensorManager_getDefaultSensor".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("ASensorManager_getDefaultSensor", ret_one)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "ASensorManager_getDefaultSensor",
+            ret_one,
+        )),
     );
     symbol.insert(
         "ASensorManager_getInstance".to_string(),
@@ -628,11 +648,17 @@ fn register_libandroid(emulator: &mut AndroidEmulator<'static, ()>) {
     );
     symbol.insert(
         "ASensorManager_createEventQueue".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("ASensorManager_createEventQueue", ret_one)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "ASensorManager_createEventQueue",
+            ret_one,
+        )),
     );
     symbol.insert(
         "ASensorManager_destroyEventQueue".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("ASensorManager_destroyEventQueue", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "ASensorManager_destroyEventQueue",
+            ret_zero,
+        )),
     );
     symbol.insert(
         "ASensorEventQueue_getEvents".to_string(),
@@ -648,11 +674,17 @@ fn register_libandroid(emulator: &mut AndroidEmulator<'static, ()>) {
     );
     symbol.insert(
         "ASensorEventQueue_enableSensor".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("ASensorEventQueue_enableSensor", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "ASensorEventQueue_enableSensor",
+            ret_zero,
+        )),
     );
     symbol.insert(
         "ASensorEventQueue_disableSensor".to_string(),
-        svc.register_svc(SimpleArm64Svc::new("ASensorEventQueue_disableSensor", ret_zero)),
+        svc.register_svc(SimpleArm64Svc::new(
+            "ASensorEventQueue_disableSensor",
+            ret_zero,
+        )),
     );
     let _ = emulator
         .memory()
@@ -695,63 +727,99 @@ fn ret_loader_shared_globals<T: Clone>(_name: &str, _emu: &AndroidEmulator<T>) -
     SvcCallResult::RET(LOADER_SHARED_GLOBALS_ADDR.load(Ordering::Relaxed) as i64)
 }
 
+fn patch_libmetasec_runtime(
+    emulator: &AndroidEmulator<'static, ()>,
+    module_base: u64,
+) -> Result<()> {
+    patch_libmetasec_alloc_wrapper(emulator, module_base)?;
+    Ok(())
+}
+
+fn patch_libmetasec_alloc_wrapper(
+    emulator: &AndroidEmulator<'static, ()>,
+    module_base: u64,
+) -> Result<()> {
+    let patch_addr = module_base + LIBMETASEC_ALLOC_WRAPPER_OFFSET;
+    let direct_alloc_addr = module_base + LIBMETASEC_ALLOC_DIRECT_OFFSET;
+    let patch = keystone::assemble_no_check_v2(
+        &format!("cmp x0, #0\ncsinc x0, x0, xzr, ne\nb #0x{direct_alloc_addr:x}"),
+        patch_addr,
+    );
+    emulator
+        .backend
+        .mem_write(patch_addr, &patch)
+        .map_err(|e| anyhow!("patch libmetasec allocator wrapper failed: {:?}", e))?;
+    info!(
+        "patched libmetasec allocator wrapper: 0x{:X} -> 0x{:X}",
+        patch_addr, direct_alloc_addr
+    );
+    Ok(())
+}
+
 fn install_file_resolver(emulator: &mut AndroidEmulator<'static, ()>, resources: &Resources) {
     let apk = resources.apk_file.clone();
     let so_metasec = resources.so_metasec_file.clone();
     let so_c_share = resources.so_c_share_file.clone();
     let msdata = resources.msdata_file.clone();
 
-    emulator.get_file_system().set_file_resolver(Box::new(move |_fs, path, flags, _mode| {
-        if path.contains("libmetasec_ml.so") {
-            return Some(FileIO::File(LinuxFileIO::new(
-                so_metasec.to_string_lossy().as_ref(),
-                path,
-                flags.bits(),
-                APP_UID,
-                StMode::APP_FILE,
-            )));
-        }
+    emulator
+        .get_file_system()
+        .set_file_resolver(Box::new(move |_fs, path, flags, _mode| {
+            if path.contains("libmetasec_ml.so") {
+                return Some(FileIO::File(LinuxFileIO::new(
+                    so_metasec.to_string_lossy().as_ref(),
+                    path,
+                    flags.bits(),
+                    APP_UID,
+                    StMode::APP_FILE,
+                )));
+            }
 
-        if path.contains("libc++_shared.so") {
-            return Some(FileIO::File(LinuxFileIO::new(
-                so_c_share.to_string_lossy().as_ref(),
-                path,
-                flags.bits(),
-                APP_UID,
-                StMode::APP_FILE,
-            )));
-        }
+            if path.contains("libc++_shared.so") {
+                return Some(FileIO::File(LinuxFileIO::new(
+                    so_c_share.to_string_lossy().as_ref(),
+                    path,
+                    flags.bits(),
+                    APP_UID,
+                    StMode::APP_FILE,
+                )));
+            }
 
-        if path == APK_INSTALL_PATH {
-            return Some(FileIO::File(LinuxFileIO::new(
-                apk.to_string_lossy().as_ref(),
-                path,
-                flags.bits(),
-                APP_UID,
-                StMode::APP_FILE,
-            )));
-        }
+            if path == APK_INSTALL_PATH {
+                return Some(FileIO::File(LinuxFileIO::new(
+                    apk.to_string_lossy().as_ref(),
+                    path,
+                    flags.bits(),
+                    APP_UID,
+                    StMode::APP_FILE,
+                )));
+            }
 
-        if path == MSDATA_VFS_PATH {
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&msdata)
-                .ok()?;
-            return Some(FileIO::File(LinuxFileIO::new_with_file(
-                file,
-                path,
-                flags.bits(),
-                APP_UID,
-                StMode::APP_FILE,
-            )));
-        }
+            if path == MSDATA_VFS_PATH {
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .open(&msdata)
+                    .ok()?;
+                return Some(FileIO::File(LinuxFileIO::new_with_file(
+                    file,
+                    path,
+                    flags.bits(),
+                    APP_UID,
+                    StMode::APP_FILE,
+                )));
+            }
 
-        if path == "/data/system" || path == "/data/app" || path == "/sdcard/android" || path == DATA_USER_DIR || path == DATA_FILES_DIR {
-            return Some(FileIO::Direction(Direction::new(VecDeque::new(), path)));
-        }
+            if path == "/data/system"
+                || path == "/data/app"
+                || path == "/sdcard/android"
+                || path == DATA_USER_DIR
+                || path == DATA_FILES_DIR
+            {
+                return Some(FileIO::Direction(Direction::new(VecDeque::new(), path)));
+            }
 
-        None
-    }));
+            None
+        }));
 }

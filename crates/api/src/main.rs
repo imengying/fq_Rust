@@ -118,13 +118,15 @@ async fn chapter(
         Ok(p) => p,
         Err(e) => return Json(ApiResponse::error(400, format!("路径参数错误: {e}"))),
     };
-    match validate_numeric_id(&book_id, "书籍ID")
-        .and_then(|book_id| validate_numeric_id(&chapter_id, "章节ID").map(|chapter_id| (book_id, chapter_id)))
-    {
-        Ok((book_id, chapter_id)) => match upstream::get_chapter(&state, &book_id, &chapter_id).await {
-            Ok(response) => Json(ApiResponse::success(response)),
-            Err(error) => Json(ApiResponse::error(error.code, error.message)),
-        },
+    match validate_numeric_id(&book_id, "书籍ID").and_then(|book_id| {
+        validate_numeric_id(&chapter_id, "章节ID").map(|chapter_id| (book_id, chapter_id))
+    }) {
+        Ok((book_id, chapter_id)) => {
+            match upstream::get_chapter(&state, &book_id, &chapter_id).await {
+                Ok(response) => Json(ApiResponse::success(response)),
+                Err(error) => Json(ApiResponse::error(error.code, error.message)),
+            }
+        }
         Err(error) => Json(ApiResponse::error(error.code, error.message)),
     }
 }
@@ -188,7 +190,9 @@ fn validate_search_query(query: SearchQuery) -> Result<ValidatedSearchQuery, Ser
 fn validate_numeric_id(value: &str, field_name: &str) -> Result<String, ServiceError> {
     let normalized = value.trim();
     if normalized.is_empty() || !normalized.chars().all(|value| value.is_ascii_digit()) {
-        return Err(ServiceError::bad_request(format!("{field_name}必须为纯数字")));
+        return Err(ServiceError::bad_request(format!(
+            "{field_name}必须为纯数字"
+        )));
     }
     Ok(normalized.to_string())
 }
@@ -199,8 +203,8 @@ async fn shutdown_signal() {
 }
 
 fn init_tracing() {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_target(false)

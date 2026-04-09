@@ -35,17 +35,13 @@ impl AppState {
         let http_client = reqwest::Client::builder()
             .http1_only()
             .no_gzip()
-            .connect_timeout(Duration::from_millis(
-                config.fq.upstream.connect_timeout_ms,
-            ))
+            .connect_timeout(Duration::from_millis(config.fq.upstream.connect_timeout_ms))
             .timeout(Duration::from_millis(config.fq.upstream.read_timeout_ms))
             .build()?;
         let http_client_fallback = reqwest::Client::builder()
             .http1_only()
             .no_gzip()
-            .connect_timeout(Duration::from_millis(
-                config.fq.upstream.connect_timeout_ms,
-            ))
+            .connect_timeout(Duration::from_millis(config.fq.upstream.connect_timeout_ms))
             .timeout(Duration::from_millis(config.fq.upstream.read_timeout_ms))
             .build()?;
 

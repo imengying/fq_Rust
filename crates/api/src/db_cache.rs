@@ -85,7 +85,10 @@ impl PgChapterCache {
 
     async fn delete(&self, cache_key: &str) -> Result<()> {
         let sql = format!("DELETE FROM {} WHERE cache_key = $1", self.table_name);
-        sqlx::query(&sql).bind(cache_key).execute(&self.pool).await?;
+        sqlx::query(&sql)
+            .bind(cache_key)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

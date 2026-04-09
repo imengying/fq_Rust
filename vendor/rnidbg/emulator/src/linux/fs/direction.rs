@@ -1,9 +1,9 @@
 #![allow(non_camel_case_types)]
 
-use std::collections::VecDeque;
 use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::{Dirent, OFlag};
+use std::collections::VecDeque;
 
 #[derive(Copy, Clone)]
 pub enum DirentType {
@@ -26,15 +26,19 @@ pub struct DirectionEntry {
 impl DirectionEntry {
     pub fn new(is_file: bool, name: &str) -> Self {
         DirectionEntry {
-            direction_type: if is_file { DirentType::DT_REG } else { DirentType::DT_DIR },
-            name: name.to_string()
+            direction_type: if is_file {
+                DirentType::DT_REG
+            } else {
+                DirentType::DT_DIR
+            },
+            name: name.to_string(),
         }
     }
 
     pub fn new_with_type(direction_type: DirentType, name: &str) -> Self {
         DirectionEntry {
             direction_type,
-            name: name.to_string()
+            name: name.to_string(),
         }
     }
 }
@@ -43,7 +47,7 @@ impl DirectionEntry {
 pub struct Direction {
     pub files: VecDeque<DirectionEntry>,
     pub path: String,
-    pub off: usize
+    pub off: usize,
 }
 
 impl Direction {
@@ -53,7 +57,7 @@ impl Direction {
         Direction {
             files,
             path: path.to_string(),
-            off: 1
+            off: 1,
         }
     }
 }
@@ -95,9 +99,7 @@ impl<T: Clone> FileIOTrait<T> for Direction {
 
             let dirent_ptr = dirp.share(offset as i64);
             let mut buf = [0u8; size_of::<Dirent>()];
-            let dirent = unsafe {
-                &mut *(buf.as_mut_ptr() as *mut Dirent)
-            };
+            let dirent = unsafe { &mut *(buf.as_mut_ptr() as *mut Dirent) };
             dirent.d_ino = random + offset as u64;
             dirent.d_off = self.off as i64;
             dirent.d_reclen = d_reclen as u16;

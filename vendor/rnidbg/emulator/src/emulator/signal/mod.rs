@@ -1,16 +1,20 @@
-mod unix_sig_set;
 mod signal_task;
+mod unix_sig_set;
 
 use crate::emulator::{AndroidEmulator, RcUnsafeCell};
 
-pub use unix_sig_set::{*};
 use crate::emulator::thread::{AbstractTask, CoveredTaskSignalOps, RunnableTask};
-pub use signal_task::{*};
+pub use signal_task::*;
+pub use unix_sig_set::*;
 
 pub type SavableSignalTask<'a, T> = RcUnsafeCell<AbstractTask<'a, T>>;
 
 pub trait ISignalTask<'a, T: Clone>: RunnableTask<'a, T> {
-    fn call_handler(&mut self, signal_ops: &mut CoveredTaskSignalOps, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<Option<u64>>;
+    fn call_handler(
+        &mut self,
+        signal_ops: &mut CoveredTaskSignalOps,
+        emulator: &AndroidEmulator<'a, T>,
+    ) -> anyhow::Result<Option<u64>>;
 
     fn task_id(&self) -> i32;
 }

@@ -1,14 +1,14 @@
-pub mod module;
-pub mod symbol;
-pub mod file_system;
-pub mod init_fun;
 pub mod errno;
-pub mod thread;
+pub mod file_system;
 pub mod fs;
-pub mod structs;
-pub(crate) mod syscalls;
-mod sock;
+pub mod init_fun;
+pub mod module;
 mod pipe;
+mod sock;
+pub mod structs;
+pub mod symbol;
+pub(crate) mod syscalls;
+pub mod thread;
 
 pub(crate) use module::LinuxModule;
 

@@ -1,13 +1,13 @@
-use std::cell::{RefCell, UnsafeCell};
-use std::io::Cursor;
-use std::rc::Rc;
-use anyhow::anyhow;
-use bytes::{Buf, BytesMut};
-use log::warn;
 use crate::elf::memorized_object::MemoizedObject;
 use crate::elf::section::{ElfSection, ElfSectionData};
 use crate::elf::segment::ElfSegment;
 use crate::elf::str_tab::ElfStringTable;
+use anyhow::anyhow;
+use bytes::{Buf, BytesMut};
+use log::warn;
+use std::cell::{RefCell, UnsafeCell};
+use std::io::Cursor;
+use std::rc::Rc;
 
 pub const FT_REL: u16 = 1;
 pub const FT_EXEC: u16 = 2;
@@ -42,7 +42,9 @@ impl ElfFile {
             buffer: Rc::new(UnsafeCell::new(Cursor::new(buffer))),
         };
 
-        let mut elf_file = Self { ..Default::default() };
+        let mut elf_file = Self {
+            ..Default::default()
+        };
 
         let mut ident = [0u8; 16];
         parser.read(&mut ident);
@@ -60,11 +62,11 @@ impl ElfFile {
         if elf_file.encoding != 1 {
             warn!("Unsupported ELF encoding: {}", elf_file.encoding);
         }
-        
+
         if ident[6] != 1 {
             panic!("Invalid ELF version");
         }
-        
+
         elf_file.file_type = parser.read_short();
         elf_file.arch = parser.read_short();
         if elf_file.arch != 0xB7 {
@@ -92,7 +94,8 @@ impl ElfFile {
         let elf_file_mut = unsafe { &mut *elf_file.get() };
         let mut section_headers = Vec::with_capacity(elf_file_mut.num_sh as usize);
         for i in 0..elf_file_mut.num_sh {
-            let section_header_offset = elf_file_mut.sh_offset + (i as usize * elf_file_mut.sh_entry_size as usize);
+            let section_header_offset =
+                elf_file_mut.sh_offset + (i as usize * elf_file_mut.sh_entry_size as usize);
             let section = ElfSection::new(elf_file.clone(), parser.clone(), section_header_offset);
             section_headers.push(section);
         }
@@ -100,11 +103,16 @@ impl ElfFile {
 
         let mut program_headers = Vec::with_capacity(elf_file_mut.num_ph as usize);
         for i in 0..elf_file_mut.num_ph {
-            let program_header_offset = elf_file_mut.ph_offset + (i as usize * elf_file_mut.ph_entry_size as usize);
+            let program_header_offset =
+                elf_file_mut.ph_offset + (i as usize * elf_file_mut.ph_entry_size as usize);
             let cloned_parser = parser.clone();
             let cloned_elf = elf_file.clone();
             program_headers.push(MemoizedObject::new(move || {
-                Ok(ElfSegment::new(cloned_elf.clone(), cloned_parser.clone(), program_header_offset))
+                Ok(ElfSegment::new(
+                    cloned_elf.clone(),
+                    cloned_parser.clone(),
+                    program_header_offset,
+                ))
             }));
         }
 
@@ -115,7 +123,8 @@ impl ElfFile {
 
     pub fn get_program_header(&self, index: usize) -> Option<ElfSegment> {
         let header = self.program_headers.get(index)?;
-        header.get_value()
+        header
+            .get_value()
             .map_err(|e| eprintln!("Error getting program header: {:?}", e))
             .ok()
     }
@@ -125,21 +134,27 @@ impl ElfFile {
     }
 
     pub fn get_section_name_string_table(&self) -> anyhow::Result<ElfStringTable> {
-        let section = self.get_section(self.sh_string_ndx as usize)
-            .ok_or(anyhow!("Failed to get section: get_section_name_string_table"))?;
+        let section = self
+            .get_section(self.sh_string_ndx as usize)
+            .ok_or(anyhow!(
+                "Failed to get section: get_section_name_string_table"
+            ))?;
         match section.data {
-            ElfSectionData::StringTable(ref string_table) => {
-                string_table.get_value()
-            }
-            _ => Err(anyhow!("Section {} is not a string table", self.sh_string_ndx))
+            ElfSectionData::StringTable(ref string_table) => string_table.get_value(),
+            _ => Err(anyhow!(
+                "Section {} is not a string table",
+                self.sh_string_ndx
+            )),
         }
     }
 
     pub fn virtual_memory_addr_to_file_offset(&self, address: u64) -> u64 {
         for i in 0..self.num_ph {
-            let ph = self.get_program_header(i as usize)
+            let ph = self
+                .get_program_header(i as usize)
                 .expect("Failed to get program header");
-            if address >= ph.virtual_address && address < (ph.virtual_address + ph.mem_size as u64) {
+            if address >= ph.virtual_address && address < (ph.virtual_address + ph.mem_size as u64)
+            {
                 let relative_offset = address - ph.virtual_address;
                 if relative_offset >= ph.file_size as u64 {
                     panic!("Can not convert virtual memory address {} to file offset - found segment {:?} but address maps to memory outside file range", address, ph);
@@ -160,12 +175,11 @@ impl ElfFile {
 
     pub fn find_str_tab_with_name(&self, name: &str) -> anyhow::Result<ElfStringTable> {
         for i in 0..self.num_sh {
-            let sh = self.get_section(i as usize)
-                .expect("Failed to get section");
-            let sh_name= sh.name(self)?;
+            let sh = self.get_section(i as usize).expect("Failed to get section");
+            let sh_name = sh.name(self)?;
             if sh_name == name {
                 if let ElfSectionData::StringTable(ref string_table) = sh.data {
-                    return string_table.get_value()
+                    return string_table.get_value();
                 }
             }
         }
@@ -174,8 +188,7 @@ impl ElfFile {
 
     pub fn find_section_by_type(&self, typ: u32) -> anyhow::Result<ElfSection> {
         for i in 0..self.num_sh {
-            let sh = self.get_section(i as usize)
-                .expect("Failed to get section");
+            let sh = self.get_section(i as usize).expect("Failed to get section");
             if sh.typ == typ {
                 return Ok(sh.clone());
             }
@@ -224,7 +237,7 @@ impl ElfParser {
     }
 
     pub fn read_int_or_long(&self) -> i64 {
-/*        if self.object_size == 1 {
+        /*        if self.object_size == 1 {
             self.read_int() as i64
         } else {
             self.read_long()

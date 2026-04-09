@@ -1,18 +1,22 @@
-use std::collections::HashMap;
-use std::mem;
+use crate::backend::RegisterARM64;
+use crate::elf::abi::PT_PHDR;
+use crate::emulator::memory::MemoryBlockTrait;
+use crate::emulator::{
+    AndroidEmulator, VMPointer, CUSTOM_SVC_SYSCALL_NUMBER, POST_CALLBACK_SYSCALL_NUMBER,
+};
+use crate::keystone;
+use crate::linux::errno::Errno;
+use crate::linux::structs::DlInfo;
+use crate::linux::PAGE_ALIGN;
+use crate::memory::svc_memory::SvcCallResult::{FUCK, RET, VOID};
+use crate::memory::svc_memory::{
+    assemble_svc, Arm64Svc, HookListener, SimpleArm64Svc, SvcCallResult, SvcMemory,
+};
 use anyhow::{anyhow, Error};
 use bytes::{Buf, BufMut, BytesMut};
 use log::{debug, error, info, warn};
-use crate::elf::abi::PT_PHDR;
-use crate::backend::RegisterARM64;
-use crate::emulator::{AndroidEmulator, POST_CALLBACK_SYSCALL_NUMBER, VMPointer};
-use crate::keystone;
-use crate::emulator::memory::MemoryBlockTrait;
-use crate::linux::errno::Errno;
-use crate::linux::PAGE_ALIGN;
-use crate::linux::structs::DlInfo;
-use crate::memory::svc_memory::{Arm64Svc, assemble_svc, HookListener, SimpleArm64Svc, SvcMemory, SvcCallResult};
-use crate::memory::svc_memory::SvcCallResult::{FUCK, RET, VOID};
+use std::collections::HashMap;
+use std::mem;
 
 struct DlIteratePhdr;
 struct DlClose<'a, T: Clone>(pub VMPointer<'a, T>);
@@ -39,14 +43,18 @@ pub struct ArmLD64<'a, T: Clone> {
 impl<T: Clone> ArmLD64<'_, T> {
     pub fn new<'a>(svc_memory: &mut SvcMemory<'a, T>) -> anyhow::Result<ArmLD64<'a, T>> {
         let pointer = svc_memory.allocate(0x80, "Dlfcn.error");
-        Ok(ArmLD64 {
-            error: pointer,
-        })
+        Ok(ArmLD64 { error: pointer })
     }
 }
 
 impl<'a, T: Clone> HookListener<'a, T> for ArmLD64<'a, T> {
-    fn hook(&self, emu: &AndroidEmulator<'a, T>, lib_name: String, symbol_name: String, old: u64) -> u64 {
+    fn hook(
+        &self,
+        emu: &AndroidEmulator<'a, T>,
+        lib_name: String,
+        symbol_name: String,
+        old: u64,
+    ) -> u64 {
         if lib_name != "libdl.so" {
             return 0;
         }
@@ -58,7 +66,9 @@ impl<'a, T: Clone> HookListener<'a, T> for ArmLD64<'a, T> {
             }
             "dlerror" => svc.register_svc(Box::new(DlError(self.error.clone()))),
             "dlclose" => svc.register_svc(Box::new(DlClose(self.error.clone()))),
-            "dlopen" | "android_dlopen_ext" => svc.register_svc(Box::new(DlOpen(self.error.clone()))),
+            "dlopen" | "android_dlopen_ext" => {
+                svc.register_svc(Box::new(DlOpen(self.error.clone())))
+            }
             "dladdr" => svc.register_svc(Box::new(DlAddr)),
             "dlsym" | "dlvsym" => svc.register_svc(Box::new(DlSym)),
             "dl_unwind_find_exidx" => svc.register_svc(Box::new(DlUnwindFindExidx)),
@@ -75,7 +85,7 @@ impl<'a, T: Clone> HookListener<'a, T> for ArmLD64<'a, T> {
             "android_get_application_target_sdk_version" => {
                 svc.register_svc(SimpleArm64Svc::new(symbol_name.as_str(), return_target_sdk))
             }
-            _ => panic!("[libdl] symbol not found: {}", symbol_name)
+            _ => panic!("[libdl] symbol not found: {}", symbol_name),
         }
     }
 }
@@ -89,41 +99,44 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
         let code = [
             "sub sp, sp, #0x10",
             "stp x29, x30, [sp]",
-            &format!("svc #0x{:x}", number),
-            "ldr x13, [sp]", // x13 == callback 0xc
+            &format!("mov x12, #0x{:x}", number),
+            &format!("mov x16, #0x{:x}", CUSTOM_SVC_SYSCALL_NUMBER),
+            "loop:",
+            "svc #0",
+            "ldr x13, [sp]",    // x13 == callback 0xc
             "add sp, sp, #0x8", // pop callback
-            "cmp x13, #0", // if callback == 0
-            "b.eq #0x58", // 0x58
-            "ldr x0, [sp]", // x0 == ptr
+            "cmp x13, #0",      // if callback == 0
+            "b.eq post_callback",
+            "ldr x0, [sp]",     // x0 == ptr
             "add sp, sp, #0x8", // pop ptr
-            "ldr x1, [sp]", // x1 == size
+            "ldr x1, [sp]",     // x1 == size
             "add sp, sp, #0x8", // pop size
-            "ldr x2, [sp]", // x2 == data
+            "ldr x2, [sp]",     // x2 == data
             "add sp, sp, #0x8", // pop data
-            "blr x13", // callback(ptr, size, data)
-                        // int (*callback)(struct dl_phdr_info *info,
-                        //        size_t size, void *data)
+            "blr x13",          // callback(ptr, size, data)
+            // int (*callback)(struct dl_phdr_info *info,
+            //        size_t size, void *data)
             "cmp x0, #0", // if callback return 0
-            "b.eq #0xc", // loop
-            "ldr x13, [sp]", // 0x40
+            "b.eq loop",
+            "ldr x13, [sp]",
             "add sp, sp, #0x8",
             "cmp x13, #0",
-            "b.eq #0x58", // 0x58
+            "b.eq post_callback",
             "add sp, sp, #0x18",
-            "b 0x40",
-            "mov x8, #0", // 0x58
+            "b loop",
+            "post_callback:",
+            "mov x8, #0",
             &format!("mov x12, #0x{:x}", number),
             &format!("mov x16, #0x{:x}", POST_CALLBACK_SYSCALL_NUMBER),
             "svc #0",
             "ldp x29, x30, [sp]",
             "add sp, sp, #0x10",
-            "ret"
+            "ret",
         ];
         let code = code.join("\n");
         let code = keystone::assemble_no_check(&code);
         let pointer = svc.allocate(code.len(), "DlIteratePhdr");
-        pointer.write_buf(code)
-            .expect("try register svc");
+        pointer.write_buf(code).expect("try register svc");
         info!("DlIteratePhdr: pointer={:X}", pointer.addr);
         pointer.addr
     }
@@ -132,32 +145,39 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
         let cb = emu.backend.reg_read(RegisterARM64::X0).unwrap();
         let data = emu.backend.reg_read(RegisterARM64::X1).unwrap();
 
-        let mut modules = emu.inner_mut()
+        let mut modules = emu
+            .inner_mut()
             .memory
             .modules
             .iter()
-            .filter(|(name, module)| {
-                unsafe { (&*module.get()).elf_file.is_some() }
-            })
+            .filter(|(name, module)| unsafe { (&*module.get()).elf_file.is_some() })
             .collect::<Vec<_>>()
             .into_iter()
             .map(|(a, b)| b.clone())
             .rev()
             .collect::<Vec<_>>();
 
-        let mut modules = modules.iter().map(|module_cell| {
-            let module = unsafe { &mut *module_cell.get() };
-            let elf_file = unsafe { &*module.elf_file.as_ref().unwrap().get() };
-            let dlpi_phdr = (0..elf_file.num_ph as usize)
-                .find_map(|index| {
-                    elf_file
-                        .get_program_header(index)
-                        .filter(|segment| segment.typ == PT_PHDR)
-                        .map(|segment| module.virtual_base + segment.virtual_address)
-                })
-                .unwrap_or(module.virtual_base + elf_file.ph_offset as u64);
-            (module.path(emu), module.virtual_base, dlpi_phdr, elf_file.num_ph)
-        }).collect::<Vec<_>>();
+        let mut modules = modules
+            .iter()
+            .map(|module_cell| {
+                let module = unsafe { &mut *module_cell.get() };
+                let elf_file = unsafe { &*module.elf_file.as_ref().unwrap().get() };
+                let dlpi_phdr = (0..elf_file.num_ph as usize)
+                    .find_map(|index| {
+                        elf_file
+                            .get_program_header(index)
+                            .filter(|segment| segment.typ == PT_PHDR)
+                            .map(|segment| module.virtual_base + segment.virtual_address)
+                    })
+                    .unwrap_or(module.virtual_base + elf_file.ph_offset as u64);
+                (
+                    module.path(emu),
+                    module.virtual_base,
+                    dlpi_phdr,
+                    elf_file.num_ph,
+                )
+            })
+            .collect::<Vec<_>>();
 
         modules.push(("/apex/com.android.art/lib64/libart.so".to_string(), 0, 0, 0));
 
@@ -165,16 +185,22 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
         let modules_len = modules.len();
 
         let Ok(mut ptr) = emu.falloc(size * modules_len, true) else {
-            return FUCK(anyhow!("unable to alloc memory for DlIteratePhdr"))
+            return FUCK(anyhow!("unable to alloc memory for DlIteratePhdr"));
         };
-        let sp = match emu.backend.reg_read(RegisterARM64::SP)
-            .map_err(|e| anyhow!("failed to read SP: {:?}", e)) {
+        let sp = match emu
+            .backend
+            .reg_read(RegisterARM64::SP)
+            .map_err(|e| anyhow!("failed to read SP: {:?}", e))
+        {
             Ok(sp) => sp,
-            Err(e) => return FUCK(e)
+            Err(e) => return FUCK(e),
         };
 
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            debug!("DlIteratePhdr cb={:X}, data={:X}, size={}, sp={:X}", cb, data, modules_len, sp);
+            debug!(
+                "DlIteratePhdr cb={:X}, data={:X}, size={}, sp={:X}",
+                cb, data, modules_len, sp
+            );
         }
 
         let sp = VMPointer::new(sp, 0, emu.backend.clone());
@@ -182,11 +208,14 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
         sp.write_u64(0).unwrap(); // NULL-terminated
 
         for (name, vaddr, phdr, phnum) in modules {
-            info!("DlIteratePhdr: name={}, vaddr={:X}, phdr={:X}, phnum={}", name, vaddr, phdr, phnum);
+            info!(
+                "DlIteratePhdr: name={}, vaddr={:X}, phdr={:X}, phnum={}",
+                name, vaddr, phdr, phnum
+            );
 
             let dlpi_name = match emu.falloc(name.len() + 1, true) {
                 Ok(p) => p,
-                Err(e) => return FUCK(e)
+                Err(e) => return FUCK(e),
             };
             dlpi_name.write_c_string(name.as_str()).unwrap();
             ptr.write_u64_with_offset(0, vaddr).unwrap();
@@ -209,10 +238,12 @@ impl<T: Clone> Arm64Svc<T> for DlIteratePhdr {
             ptr = ptr.share(size as i64);
         }
 
-        emu.backend.reg_write(RegisterARM64::SP, sp.addr)
-            .map_err(|e| anyhow!("failed to write SP: {:?}", e)).unwrap();
+        emu.backend
+            .reg_write(RegisterARM64::SP, sp.addr)
+            .map_err(|e| anyhow!("failed to write SP: {:?}", e))
+            .unwrap();
 
-       VOID
+        VOID
     }
 
     fn on_post_callback(&self, emu: &AndroidEmulator<T>) -> u64 {
@@ -248,50 +279,70 @@ impl<T: Clone> Arm64Svc<T> for DlOpen<'_, T> {
 
     fn on_register(&self, svc: &mut SvcMemory<T>, number: u32) -> u64 {
         let mut buf = BytesMut::new();
-        buf.put_u32_le(0xd10043ff);// "sub sp, sp, #0x10"
-        buf.put_u32_le(0xa9007bfd);// "stp x29, x30, [sp]"
-        buf.put_u32_le(assemble_svc(number));// "svc #0x" + Integer.toHexString(svcNumber)
-        buf.put_u32_le(0xf94003ed);// "ldr x13, [sp]"
-        buf.put_u32_le(0x910023ff);// "add sp, sp, #0x8", manipulated stack in dlopen
-        buf.put_u32_le(0xf10001bf);// "cmp x13, #0"
-        buf.put_u32_le(0x54000060);// "b.eq #0x24"
-        buf.put_u32_le(0x10ffff9e);// "adr lr, #-0xf", jump to ldr x13, [sp]
-        buf.put_u32_le(0xd61f01a0);// "br x13", call init array // "b.eq #0x24" to here
-        buf.put_u32_le(0xf94003e0);// "ldr x0, [sp]", with return address
-        buf.put_u32_le(0x910023ff);// "add sp, sp, #0x8"
-        buf.put_u32_le(0xa9407bfd);// "ldp x29, x30, [sp]"
-        buf.put_u32_le(0x910043ff);// "add sp, sp, #0x10"
-        buf.put_u32_le(0xd65f03c0);// "ret"
+        buf.put_u32_le(0xd10043ff); // "sub sp, sp, #0x10"
+        buf.put_u32_le(0xa9007bfd); // "stp x29, x30, [sp]"
+        buf.put_u32_le(0xd280000c | (((number as u64) & 0xffff) << 5) as u32); // movz x12, #number
+        buf.put_u32_le(0xd2800010 | (((CUSTOM_SVC_SYSCALL_NUMBER as u64) & 0xffff) << 5) as u32); // movz x16, #marker
+        buf.put_u32_le(assemble_svc(0)); // svc #0
+        buf.put_u32_le(0xf94003ed); // "ldr x13, [sp]"
+        buf.put_u32_le(0x910023ff); // "add sp, sp, #0x8", manipulated stack in dlopen
+        buf.put_u32_le(0xf10001bf); // "cmp x13, #0"
+        buf.put_u32_le(0x54000060); // "b.eq #0x24"
+        buf.put_u32_le(0x10ffff9e); // "adr lr, #-0xf", jump to ldr x13, [sp]
+        buf.put_u32_le(0xd61f01a0); // "br x13", call init array // "b.eq #0x24" to here
+        buf.put_u32_le(0xf94003e0); // "ldr x0, [sp]", with return address
+        buf.put_u32_le(0x910023ff); // "add sp, sp, #0x8"
+        buf.put_u32_le(0xa9407bfd); // "ldp x29, x30, [sp]"
+        buf.put_u32_le(0x910043ff); // "add sp, sp, #0x10"
+        buf.put_u32_le(0xd65f03c0); // "ret"
         let pointer = svc.allocate(buf.len(), "dlopen");
-        pointer.write_bytes(buf.freeze())
+        pointer
+            .write_bytes(buf.freeze())
             .expect("try register svc failed");
         pointer.addr
     }
 
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
-        let file_name_ptr = VMPointer::new(emu.backend.reg_read(RegisterARM64::X0).unwrap(), 0, emu.backend.clone());
+        let file_name_ptr = VMPointer::new(
+            emu.backend.reg_read(RegisterARM64::X0).unwrap(),
+            0,
+            emu.backend.clone(),
+        );
 
         let flags = emu.backend.reg_read(RegisterARM64::X1).unwrap();
         let file_name = file_name_ptr.read_string().unwrap();
 
-        let pointer = VMPointer::new(emu.backend.reg_read(RegisterARM64::SP).unwrap(), 0, emu.backend.clone());
+        let pointer = VMPointer::new(
+            emu.backend.reg_read(RegisterARM64::SP).unwrap(),
+            0,
+            emu.backend.clone(),
+        );
         let pointer = pointer.share_with_size(-8, 0); // ret
 
         if !file_name.is_ascii() {
             if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-                debug!("syscall dlopen(file_name=hex::decode({}), flags=0x{:X}) => 0", hex::encode(file_name.as_bytes()), flags);
+                debug!(
+                    "syscall dlopen(file_name=hex::decode({}), flags=0x{:X}) => 0",
+                    hex::encode(file_name.as_bytes()),
+                    flags
+                );
             }
 
             pointer.write_u64(0).unwrap(); // dlopen函数调用返回值
             let pointer = pointer.share_with_size(-8, 0);
             pointer.write_u64(0).unwrap();
             emu.set_errno(Errno::ENOENT.as_i32()).unwrap();
-            emu.backend.reg_write(RegisterARM64::SP, pointer.addr).unwrap();
+            emu.backend
+                .reg_write(RegisterARM64::SP, pointer.addr)
+                .unwrap();
 
-            return RET(0)
+            return RET(0);
         } else {
             if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-                debug!("syscall dlopen(file_name={}, flags=0x{:X})", file_name, flags);
+                debug!(
+                    "syscall dlopen(file_name={}, flags=0x{:X})",
+                    file_name, flags
+                );
             }
         }
 
@@ -302,16 +353,22 @@ impl<T: Clone> Arm64Svc<T> for DlOpen<'_, T> {
             if pointer.addr <= 0 {
                 panic!("dlopen failed");
             }
-            emu.backend.reg_write(RegisterARM64::SP, pointer.addr).unwrap();
-            return RET(0)
+            emu.backend
+                .reg_write(RegisterARM64::SP, pointer.addr)
+                .unwrap();
+            return RET(0);
         } else {
             warn!("dlopen unsupported, returning null: {}", file_name);
-            let _ = self.0.write_c_string(format!("dlopen unsupported: {}", file_name).as_str());
+            let _ = self
+                .0
+                .write_c_string(format!("dlopen unsupported: {}", file_name).as_str());
             pointer.write_u64(0).unwrap();
             let pointer = pointer.share_with_size(-8, 0);
             pointer.write_u64(0).unwrap();
             emu.set_errno(Errno::ENOENT.as_i32()).unwrap();
-            emu.backend.reg_write(RegisterARM64::SP, pointer.addr).unwrap();
+            emu.backend
+                .reg_write(RegisterARM64::SP, pointer.addr)
+                .unwrap();
             return RET(0);
         }
     }
@@ -335,7 +392,9 @@ impl<T: Clone> Arm64Svc<T> for DlAddr {
             return if let Ok(symbol) = symbol {
                 let path = &module.path(emu);
                 //let path = path.split('/').last().unwrap();
-                let path_ptr = emu.falloc(path.len() + 1 + symbol.name.len() + 1, true).unwrap();
+                let path_ptr = emu
+                    .falloc(path.len() + 1 + symbol.name.len() + 1, true)
+                    .unwrap();
                 path_ptr.write_c_string(path).unwrap();
                 let sname_ptr = path_ptr.share((path.len() + 1) as i64);
                 sname_ptr.write_c_string(symbol.name.as_str()).unwrap();
@@ -350,7 +409,10 @@ impl<T: Clone> Arm64Svc<T> for DlAddr {
                 emu.backend.mem_write(info_ptr, &buffer).unwrap();
 
                 if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-                    debug!("syscall dladdr(addr=0x{:X}, info_ptr=0x{:X}) => Module(name={}, function)", addr, info_ptr, module.name);
+                    debug!(
+                        "syscall dladdr(addr=0x{:X}, info_ptr=0x{:X}) => Module(name={}, function)",
+                        addr, info_ptr, module.name
+                    );
                 }
 
                 RET(1)
@@ -375,10 +437,13 @@ impl<T: Clone> Arm64Svc<T> for DlAddr {
                 }
 
                 RET(1)
-            }
+            };
         } else {
             if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-                debug!("syscall dladdr(addr=0x{:X}, info_ptr=0x{:X}) => NotFound", addr, info_ptr);
+                debug!(
+                    "syscall dladdr(addr=0x{:X}, info_ptr=0x{:X}) => NotFound",
+                    addr, info_ptr
+                );
             }
         }
         RET(0)

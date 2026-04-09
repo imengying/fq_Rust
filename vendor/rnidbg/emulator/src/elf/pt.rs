@@ -1,6 +1,6 @@
-use bytes::BytesMut;
 use crate::backend::Backend;
 use crate::elf::parser::ElfParser;
+use bytes::BytesMut;
 
 #[derive(Clone)]
 pub struct PtLoadData {
@@ -9,7 +9,8 @@ pub struct PtLoadData {
 
 impl PtLoadData {
     pub fn write_to<'a, T: Clone>(&self, address: u64, backend: &Backend<T>) {
-        backend.mem_write(address, self.buffer.as_slice())
+        backend
+            .mem_write(address, self.buffer.as_slice())
             .expect("Failed to write PT_LOAD data");
     }
 }
@@ -24,33 +25,37 @@ impl GnuEhFrameHeader {
     pub fn new(parser: ElfParser, offset: usize, mem_size: usize, virtual_address: u64) -> Self {
         parser.seek(offset);
 
-        let mut off = Off{ pos: offset, init: offset };
-        let version = parser.read_byte(); off.pos += 1;
+        let mut off = Off {
+            pos: offset,
+            init: offset,
+        };
+        let version = parser.read_byte();
+        off.pos += 1;
         if version != 1 {
             panic!("Invalid version in .eh_frame_hdr section: {}", version);
         }
 
         let delta = virtual_address - offset as u64;
-        let eh_frame_ptr_enc = parser.read_ubyte(); off.pos += 1;
-        let fde_count_enc = parser.read_ubyte(); off.pos += 1;
-        let table_enc = parser.read_ubyte(); off.pos += 1;
+        let eh_frame_ptr_enc = parser.read_ubyte();
+        off.pos += 1;
+        let fde_count_enc = parser.read_ubyte();
+        off.pos += 1;
+        let table_enc = parser.read_ubyte();
+        off.pos += 1;
         let eh_frame_ptr = read_encoded_pointer(&parser, eh_frame_ptr_enc, &mut off, true);
         let fde_count = read_encoded_pointer(&parser, fde_count_enc, &mut off, true);
         let mut entries = vec![];
         for _ in 0..fde_count {
             let location = read_encoded_pointer(&parser, table_enc, &mut off, true) + delta;
             let address = read_encoded_pointer(&parser, table_enc, &mut off, true);
-            entries.push(TableEntry{ location, address });
+            entries.push(TableEntry { location, address });
         }
 
         if off.pos - off.init != mem_size {
             panic!("size={} pos={}", mem_size, off.pos);
         }
 
-        Self {
-            parser,
-            entries,
-        }
+        Self { parser, entries }
     }
 }
 
@@ -65,7 +70,12 @@ pub struct TableEntry {
     pub address: u64,
 }
 
-fn read_encoded_pointer(parser: &ElfParser, encoding: u8, off: &mut Off, check_indirect: bool) -> u64 {
+fn read_encoded_pointer(
+    parser: &ElfParser,
+    encoding: u8,
+    off: &mut Off,
+    check_indirect: bool,
+) -> u64 {
     if encoding == 0xff {
         return 0;
     }
@@ -117,7 +127,10 @@ fn read_encoded_pointer(parser: &ElfParser, encoding: u8, off: &mut Off, check_i
 
     if encoding & 0x80 != 0 {
         if check_indirect {
-            panic!("DW_EH_PE_indirect: Indirect encoding not supported: 0x{:X}", encoding);
+            panic!(
+                "DW_EH_PE_indirect: Indirect encoding not supported: 0x{:X}",
+                encoding
+            );
         }
     }
 
@@ -141,14 +154,14 @@ fn read_uleb128(parser: &ElfParser, off: &mut Off) -> u64 {
 #[derive(Clone)]
 pub struct ArmExIdx {
     buffer: BytesMut,
-    virtual_address: u64
+    virtual_address: u64,
 }
 
 impl ArmExIdx {
     pub fn new(virtual_address: u64, buffer: Vec<u8>) -> Self {
         Self {
             buffer: BytesMut::from(buffer.as_slice()),
-            virtual_address
+            virtual_address,
         }
     }
 }

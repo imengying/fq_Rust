@@ -1353,7 +1353,7 @@ pub const SHF_ARM_PURECODE: u64 = 0x20000000;
 /// optional, but if present it must appear before segment of type PT_LOAD.
 pub const PT_ARM_ARCHEXT: u32 = 0x70000000;
 /// alias for unwind
-pub const PT_ARM_EXIDX: u32 = 0x70000001;//0x70000001
+pub const PT_ARM_EXIDX: u32 = 0x70000001; //0x70000001
 /// Exception unwind tables
 pub const PT_ARM_UNWIND: u32 = 0x70000001;
 

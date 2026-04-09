@@ -1,14 +1,17 @@
-use anyhow::anyhow;
-use crate::emulator::{AndroidEmulator, VMPointer};
 use crate::emulator::func::FunctionCall;
-use crate::emulator::signal::{SavableSignalTask, SignalOps, ISignalTask, SigSet, SignalTask};
-use crate::emulator::thread::{CoveredTask, CoveredTaskSignalOps, DestroyListener, LuoTask, RunnableTask, Task, TaskStatus, Waiter};
+use crate::emulator::signal::{ISignalTask, SavableSignalTask, SigSet, SignalOps, SignalTask};
+use crate::emulator::thread::{
+    CoveredTask, CoveredTaskSignalOps, DestroyListener, LuoTask, RunnableTask, Task, TaskStatus,
+    Waiter,
+};
+use crate::emulator::{AndroidEmulator, VMPointer};
+use anyhow::anyhow;
 
 pub struct BaseThreadTask<'a, T: Clone> {
     pub until: u64,
     pub exit_status: i32,
     pub finished: bool,
-    covered_task: CoveredTask<'a, T>
+    covered_task: CoveredTask<'a, T>,
 }
 
 impl<'a, T: Clone> BaseThreadTask<'a, T> {
@@ -18,10 +21,12 @@ impl<'a, T: Clone> BaseThreadTask<'a, T> {
 }
 
 impl<T: Clone> BaseThreadTask<'_, T> {
-    pub fn new(tid: u32, until: u64) -> Self<> {
+    pub fn new(tid: u32, until: u64) -> Self {
         Self {
-            until, exit_status: 0, finished: false,
-            covered_task: CoveredTask::new(tid)
+            until,
+            exit_status: 0,
+            finished: false,
+            covered_task: CoveredTask::new(tid),
         }
     }
 }
@@ -71,7 +76,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseThreadTask<'a, T> {
         self.covered_task.push_function(emulator, call)
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         self.covered_task.pop_function(emulator, address)
     }
 
@@ -84,15 +93,21 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseThreadTask<'a, T> {
     }
 }
 
-impl<'a, T: Clone> Task<'a, T> for BaseThreadTask<'a, T>
-{
+impl<'a, T: Clone> Task<'a, T> for BaseThreadTask<'a, T> {
     fn get_id(&self) -> u32 {
         self.covered_task.get_id()
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         if self.is_context_saved() {
-            return Ok(self.covered_task.base_task.continue_run(emulator, self.until))
+            return Ok(self
+                .covered_task
+                .base_task
+                .continue_run(emulator, self.until));
         }
         luo_task.run(emulator)
     }

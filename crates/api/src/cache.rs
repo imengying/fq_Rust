@@ -34,13 +34,8 @@ impl<V: Clone> TtlCache<V> {
 
     pub fn insert(&self, key: impl Into<String>, value: V) {
         let expires_at = self.ttl.map(|ttl| Instant::now() + ttl);
-        self.entries.insert(
-            key.into(),
-            CacheEntry {
-                value,
-                expires_at,
-            },
-        );
+        self.entries
+            .insert(key.into(), CacheEntry { value, expires_at });
     }
 
     /// Remove all expired entries. Call periodically from a background task.
@@ -56,4 +51,3 @@ fn is_expired(expires_at: Option<Instant>) -> bool {
         .map(|value| Instant::now() >= value)
         .unwrap_or(false)
 }
-

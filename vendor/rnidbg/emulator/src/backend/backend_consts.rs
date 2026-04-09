@@ -1,9 +1,9 @@
 use bitflags::bitflags;
 
-#[cfg(feature = "unicorn_backend")]
-use unicorn_engine::Context as UnicornContext;
 #[cfg(feature = "dynarmic_backend")]
 use dynarmic::DynarmicContext;
+#[cfg(feature = "unicorn_backend")]
+use unicorn_engine::Context as UnicornContext;
 
 #[derive(Clone)]
 pub enum Context {

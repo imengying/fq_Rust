@@ -1,12 +1,12 @@
 use crate::emulator::VMPointer;
+use crate::linux::file_system::*;
 use crate::linux::structs::OFlag;
-use crate::linux::file_system::{*};
 
 pub struct Cpuinfo {
     pub path: String,
     pub oflags: u32,
     pub data: [u8; 4096],
-    pub pos: usize
+    pub pos: usize,
 }
 
 impl Cpuinfo {
@@ -27,7 +27,7 @@ impl Cpuinfo {
             path: path.to_string(),
             oflags,
             data,
-            pos: 0
+            pos: 0,
         }
     }
 }
@@ -101,7 +101,7 @@ impl<T: Clone> FileIOTrait<T> for Cpuinfo {
                 self.pos = (pos + offset) as usize;
                 pos + offset
             }
-            _ => return SeekResult::WhenceError
+            _ => return SeekResult::WhenceError,
         })
     }
 

@@ -112,7 +112,10 @@ impl RegisterKeyService {
             return Err(ServiceError::bad_request("device_fingerprint 不能为空"));
         }
 
-        let mut removed = self.current_by_fingerprint.remove(device_fingerprint).is_some();
+        let mut removed = self
+            .current_by_fingerprint
+            .remove(device_fingerprint)
+            .is_some();
         let prefix = format!("{device_fingerprint}:");
         let keys: Vec<String> = self
             .cache_by_key
@@ -150,7 +153,10 @@ impl RegisterKeyService {
     }
 
     fn trim_if_needed(&self) {
-        let overflow = self.cache_by_key.len().saturating_sub(self.cache_max_entries);
+        let overflow = self
+            .cache_by_key
+            .len()
+            .saturating_sub(self.cache_max_entries);
         if overflow == 0 {
             return;
         }
@@ -203,7 +209,9 @@ async fn fetch_register_key(
         .json(&payload)
         .send()
         .await
-        .map_err(|error| ServiceError::internal(format!("registerkey upstream 请求失败: {error}")))?;
+        .map_err(|error| {
+            ServiceError::internal(format!("registerkey upstream 请求失败: {error}"))
+        })?;
 
     let status = response.status();
     let content_encoding = response
@@ -211,12 +219,13 @@ async fn fetch_register_key(
         .get(reqwest::header::CONTENT_ENCODING)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| ServiceError::internal(format!("registerkey upstream 响应读取失败: {error}")))?;
+    let body = response.bytes().await.map_err(|error| {
+        ServiceError::internal(format!("registerkey upstream 响应读取失败: {error}"))
+    })?;
     let response_body = decode_upstream_response(body.as_ref(), content_encoding.as_deref())
-        .map_err(|error| ServiceError::internal(format!("registerkey upstream 解压失败: {error}")))?;
+        .map_err(|error| {
+            ServiceError::internal(format!("registerkey upstream 解压失败: {error}"))
+        })?;
 
     if response_body.trim().is_empty() {
         return Err(ServiceError::internal("registerkey upstream 返回空响应"));
@@ -228,8 +237,9 @@ async fn fetch_register_key(
         )));
     }
 
-    let parsed: FqRegisterKeyResponse = serde_json::from_str(&response_body)
-        .map_err(|error| ServiceError::internal(format!("registerkey upstream JSON 解析失败: {error}")))?;
+    let parsed: FqRegisterKeyResponse = serde_json::from_str(&response_body).map_err(|error| {
+        ServiceError::internal(format!("registerkey upstream JSON 解析失败: {error}"))
+    })?;
     if parsed.code != 0 {
         return Err(ServiceError::internal(format!(
             "registerkey upstream 失败: {}",

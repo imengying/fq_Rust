@@ -219,6 +219,9 @@ impl<'a, T: Clone> VaList<'a, T> {
 impl<T: Clone> VaPrimitive<T> for DvmObject {
     fn get(list: &mut VaList<T>, dvm: &DalvikVM64<T>) -> Self {
         let object_id = list.get::<i64>(dvm);
+        if object_id == 0 {
+            return DvmObject::ObjectRef(0);
+        }
         let flag = get_flag_id(object_id);
         if flag == JNI_FLAG_OBJECT {
             dvm.get_local_ref(object_id).unwrap().clone()

@@ -6,7 +6,7 @@ pub struct Meminfo {
     pub path: String,
     pub oflags: u32,
     pub data: [u8; 4096],
-    pub pos: usize
+    pub pos: usize,
 }
 
 impl Meminfo {
@@ -27,7 +27,7 @@ impl Meminfo {
             path: path.to_string(),
             oflags,
             data,
-            pos: 0
+            pos: 0,
         }
     }
 }
@@ -177,7 +177,7 @@ impl<T: Clone> FileIOTrait<T> for Meminfo {
                 self.pos = (pos + offset) as usize;
                 pos + offset
             }
-            _ => return SeekResult::WhenceError
+            _ => return SeekResult::WhenceError,
         })
     }
 
@@ -205,5 +205,3 @@ impl<T: Clone> FileIOTrait<T> for Meminfo {
         panic!("Meminfo is read-only");
     }
 }
-
-

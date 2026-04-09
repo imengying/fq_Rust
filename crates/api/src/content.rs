@@ -1,10 +1,10 @@
+use crate::encoding::{decode_gzip_or_utf8, decode_hex_16};
 use aes::Aes128;
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
-use crate::encoding::{decode_gzip_or_utf8, decode_hex_16};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -15,8 +15,7 @@ static BLK_RE: Lazy<Regex> =
 static TITLE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?is)<h1[^>]*>.*?<blk[^>]*>([^<]*)</blk>.*?</h1>").expect("valid title regex")
 });
-static TAG_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)<[^>]+>").expect("valid tag regex"));
+static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<[^>]+>").expect("valid tag regex"));
 
 pub fn decrypt_and_decompress_content(encrypted_content: &str, key_hex: &str) -> Result<String> {
     let raw = BASE64

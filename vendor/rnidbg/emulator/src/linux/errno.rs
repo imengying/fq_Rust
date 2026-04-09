@@ -39,7 +39,6 @@ impl From<Errno> for i32 {
     }
 }
 
-
 /*
 #define EPERM 1
 #define ENOENT 2

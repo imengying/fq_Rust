@@ -320,7 +320,7 @@ impl RegisterARM64 {
     pub const LR: RegisterARM64 = RegisterARM64::X30;
 
     pub fn value(&self) -> i32 {
-       (*self).into()
+        (*self).into()
     }
 
     pub fn from_i32(value: i32) -> RegisterARM64 {

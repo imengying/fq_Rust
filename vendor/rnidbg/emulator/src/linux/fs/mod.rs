@@ -1,16 +1,16 @@
-pub mod linux_file;
-pub(crate) mod urandom;
-pub(crate) mod meminfo;
 pub(crate) mod cpuinfo;
-pub(crate) mod random_boot_id;
 pub mod direction;
+pub mod linux_file;
 pub(crate) mod maps;
+pub(crate) mod meminfo;
+pub(crate) mod random_boot_id;
+pub(crate) mod urandom;
 
+use crate::emulator::VMPointer;
+use crate::linux::file_system::*;
+use crate::linux::structs::OFlag;
 use std::io::{Cursor, Read};
 use std::marker::PhantomData;
-use crate::emulator::VMPointer;
-use crate::linux::file_system::{*};
-use crate::linux::structs::OFlag;
 
 pub struct ByteArrayFileIO<T: Clone> {
     pub data: Cursor<Vec<u8>>,
@@ -18,7 +18,7 @@ pub struct ByteArrayFileIO<T: Clone> {
     pub uid: i32,
     pub oflags: u32,
     pub st_mode: StMode,
-    pub pd: PhantomData<T>
+    pub pd: PhantomData<T>,
 }
 
 impl<T: Clone> ByteArrayFileIO<T> {
@@ -29,14 +29,14 @@ impl<T: Clone> ByteArrayFileIO<T> {
             uid,
             st_mode,
             oflags,
-            pd: PhantomData
+            pd: PhantomData,
         }
     }
 }
 
 impl<T: Clone> FileIOTrait<T> for ByteArrayFileIO<T> {
     fn close(&mut self) {
-       self.data.set_position(0);
+        self.data.set_position(0);
     }
 
     fn read(&mut self, buf: VMPointer<T>, mut count: usize) -> usize {
@@ -61,7 +61,9 @@ impl<T: Clone> FileIOTrait<T> for ByteArrayFileIO<T> {
         self.read(buf, count)
     }
 
-    fn write(&mut self, buf: &[u8]) -> i32 { panic!("write file: {} is not supported: BytesFileIO", self.path); }
+    fn write(&mut self, buf: &[u8]) -> i32 {
+        panic!("write file: {} is not supported: BytesFileIO", self.path);
+    }
 
     fn lseek(&mut self, offset: i64, whence: i32) -> SeekResult {
         SeekResult::Ok(match whence {
@@ -79,7 +81,7 @@ impl<T: Clone> FileIOTrait<T> for ByteArrayFileIO<T> {
                 self.data.set_position((pos + offset) as u64);
                 pos + offset
             }
-            _ => return SeekResult::WhenceError
+            _ => return SeekResult::WhenceError,
         })
     }
 
@@ -107,4 +109,3 @@ impl<T: Clone> FileIOTrait<T> for ByteArrayFileIO<T> {
         self.data.get_ref().clone()
     }
 }
-

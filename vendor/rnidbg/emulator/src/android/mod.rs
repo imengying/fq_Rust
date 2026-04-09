@@ -1,11 +1,11 @@
+use crate::emulator::{syscall_handler, AndroidEmulator};
 use log::error;
 use syscall_handler::register_syscall_handler;
-use crate::emulator::{AndroidEmulator, syscall_handler};
 
 pub mod dvm;
-pub mod virtual_library;
 pub mod jni;
 mod structs;
+pub mod virtual_library;
 
 impl<T: Clone> AndroidEmulator<'_, T> {
     /// Provide [pid], [ppid], [proc_name] to construct an android arm64 emulator.
@@ -28,18 +28,19 @@ impl<T: Clone> AndroidEmulator<'_, T> {
         pid: u32,
         ppid: u32,
         proc_name: &str,
-        data: T
+        data: T,
     ) -> AndroidEmulator<'static, T> {
-        let mut context: AndroidEmulator<'static, T> = AndroidEmulator::new(pid, ppid, proc_name.to_string(), data)
-            .map_err(|e| error!("failed to init emu: {}", e))
-            .unwrap();
+        let mut context: AndroidEmulator<'static, T> =
+            AndroidEmulator::new(pid, ppid, proc_name.to_string(), data)
+                .map_err(|e| error!("failed to init emu: {}", e))
+                .unwrap();
 
-        context.set_errno(0)
-            .expect("failed to set errno");
+        context.set_errno(0).expect("failed to set errno");
 
         register_syscall_handler(&context);
 
-        context.setup_traps()
+        context
+            .setup_traps()
             .map_err(|e| error!("failed to setup traps: {}", e))
             .unwrap();
 

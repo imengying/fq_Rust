@@ -1,19 +1,18 @@
+use crate::elf::parser::ElfParser;
+use bytes::Buf;
 use std::cell::UnsafeCell;
 use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
 use std::rc::Rc;
-use bytes::Buf;
-use crate::elf::parser::ElfParser;
 
 #[derive(Clone)]
 pub struct ElfStringTable {
-    buffer: Rc<UnsafeCell<Cursor<Vec<u8>>>>
+    buffer: Rc<UnsafeCell<Cursor<Vec<u8>>>>,
 }
 
 impl Debug for ElfStringTable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ElfStringTable")
-            .finish()
+        f.debug_struct("ElfStringTable").finish()
     }
 }
 
@@ -25,7 +24,7 @@ impl ElfStringTable {
         parser.read(&mut buffer);
 
         Self {
-            buffer: Rc::new(UnsafeCell::new(Cursor::new(buffer)))
+            buffer: Rc::new(UnsafeCell::new(Cursor::new(buffer))),
         }
     }
 

@@ -22,7 +22,7 @@ impl ElfRelocation {
 
         let offset = parser.read_int_or_long() as u64;
         let info = parser.read_int_or_long();
-/*        let addend = if object_size == 1 {
+        /*        let addend = if object_size == 1 {
             if entry_size >= 12 {
                 parser.read_int() as i64
             } else {

@@ -45,13 +45,8 @@ pub async fn search_books(
     }
 
     let offset = page.saturating_sub(1).saturating_mul(size);
-    let mut request = SearchUpstreamRequest::new(
-        key.clone(),
-        offset,
-        size,
-        tab_type,
-        search_id.clone(),
-    );
+    let mut request =
+        SearchUpstreamRequest::new(key.clone(), offset, size, tab_type, search_id.clone());
 
     let response = if request.search_id.is_some() {
         execute_search_once_with_rotation(state, &request, "SEARCH_WITH_ID_FAIL").await?
@@ -65,7 +60,8 @@ pub async fn search_books(
             && state.rotate_device_if_allowed("SEARCH_NO_SEARCH_ID")
         {
             first_response =
-                execute_search_once_with_rotation(state, &request, "SEARCH_NO_SEARCH_ID_RETRY").await?;
+                execute_search_once_with_rotation(state, &request, "SEARCH_NO_SEARCH_ID_RETRY")
+                    .await?;
         }
         if first_response.search_id.is_some() || !first_response.books.is_empty() {
             if let Some(search_id) = first_response.search_id.clone() {
@@ -79,7 +75,8 @@ pub async fn search_books(
                 second_request.is_first_enter_search = false;
                 second_request.last_search_page_interval = delay_ms as i32;
                 let mut second_response =
-                    execute_search_once_with_rotation(state, &second_request, "SEARCH_PHASE2_FAIL").await?;
+                    execute_search_once_with_rotation(state, &second_request, "SEARCH_PHASE2_FAIL")
+                        .await?;
                 if second_response.search_id.is_none() {
                     second_response.search_id = Some(search_id);
                 }
@@ -112,7 +109,11 @@ pub async fn get_book_info(state: &AppState, book_id: &str) -> ServiceResult<Boo
     Ok(book_info)
 }
 
-pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> ServiceResult<ChapterInfo> {
+pub async fn get_chapter(
+    state: &AppState,
+    book_id: &str,
+    chapter_id: &str,
+) -> ServiceResult<ChapterInfo> {
     let cache_key = chapter_cache_key(book_id, chapter_id);
     if let Some(cached) = state.chapter_cache.get(&cache_key) {
         return Ok(cached);
@@ -120,7 +121,9 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
     if let Some(pg_cache) = &state.pg_chapter_cache {
         match pg_cache.get(&cache_key, now_ms()).await {
             Ok(Some(cached)) => {
-                state.chapter_cache.insert(cache_key.clone(), cached.clone());
+                state
+                    .chapter_cache
+                    .insert(cache_key.clone(), cached.clone());
                 return Ok(cached);
             }
             Ok(None) => {}
@@ -132,12 +135,12 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
 
     let directory = fetch_directory(state, book_id, true).await.ok();
     if state.config.fq.prefetch.enabled {
-        if let Err(error) = prefetch_and_cache_dedup(state, book_id, chapter_id, directory.as_ref()).await {
+        if let Err(error) =
+            prefetch_and_cache_dedup(state, book_id, chapter_id, directory.as_ref()).await
+        {
             warn!(
                 "chapter prefetch failed: book_id={}, chapter_id={}, reason={}",
-                book_id,
-                chapter_id,
-                error.message
+                book_id, chapter_id, error.message
             );
         }
         if let Some(cached) = state.chapter_cache.get(&cache_key) {
@@ -150,8 +153,14 @@ pub async fn get_chapter(state: &AppState, book_id: &str, chapter_id: &str) -> S
         .data
         .get(chapter_id)
         .ok_or_else(|| ServiceError::internal("上游未返回目标章节"))?;
-    let chapter =
-        build_chapter_from_item_content(state, book_id, chapter_id, item_content, directory.as_ref()).await?;
+    let chapter = build_chapter_from_item_content(
+        state,
+        book_id,
+        chapter_id,
+        item_content,
+        directory.as_ref(),
+    )
+    .await?;
     cache_chapter(state, &chapter).await;
     Ok(chapter)
 }
@@ -197,10 +206,7 @@ pub async fn run_startup_probe(state: &AppState) {
             Ok(ProbeOutcome::Failed(reason)) => {
                 warn!(
                     "startup probe failed: name={}, device_id={}, install_id={}, reason={}",
-                    profile.name,
-                    profile.device.device_id,
-                    profile.device.install_id,
-                    reason
+                    profile.name, profile.device.device_id, profile.device.install_id, reason
                 );
             }
             Err(error) => {
@@ -229,11 +235,21 @@ pub async fn run_startup_probe(state: &AppState) {
     let _ = state
         .device_pool
         .activate_profile_by_name(&original_name, "STARTUP_PROBE_RESTORE");
-    warn!("startup probe failed for all attempted devices; restored {}", original_name);
+    warn!(
+        "startup probe failed for all attempted devices; restored {}",
+        original_name
+    );
 }
 
-async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> ServiceResult<DirectoryResponse> {
-    let cache_key = format!("directory:{}:{book_id}", if minimal { "min" } else { "full" });
+async fn fetch_directory(
+    state: &AppState,
+    book_id: &str,
+    minimal: bool,
+) -> ServiceResult<DirectoryResponse> {
+    let cache_key = format!(
+        "directory:{}:{book_id}",
+        if minimal { "min" } else { "full" }
+    );
     if let Some(cached) = state.directory_cache.get(&cache_key) {
         return Ok(cached);
     }
@@ -241,7 +257,8 @@ async fn fetch_directory(state: &AppState, book_id: &str, minimal: bool) -> Serv
     let directory = match fetch_directory_once(state, book_id, minimal).await {
         Ok(value) => value,
         Err(error) => {
-            if should_rotate_after_error(&error) && state.rotate_device_if_allowed("DIRECTORY_FAIL") {
+            if should_rotate_after_error(&error) && state.rotate_device_if_allowed("DIRECTORY_FAIL")
+            {
                 match fetch_directory_once(state, book_id, minimal).await {
                     Ok(value) => value,
                     Err(error) => {
@@ -294,7 +311,10 @@ async fn fetch_directory_once(
     Ok(directory)
 }
 
-async fn execute_search_once(state: &AppState, request: &SearchUpstreamRequest) -> ServiceResult<SearchResponse> {
+async fn execute_search_once(
+    state: &AppState,
+    request: &SearchUpstreamRequest,
+) -> ServiceResult<SearchResponse> {
     let device = state.current_device_profile();
     let params = build_search_params(&device, request);
     let url = build_url(
@@ -347,7 +367,9 @@ async fn fetch_batch_full(
     match fetch_batch_full_once(state, book_id, item_ids).await {
         Ok(value) => Ok(value),
         Err(error) => {
-            if should_rotate_after_error(&error) && state.rotate_device_if_allowed("BATCH_FULL_FAIL") {
+            if should_rotate_after_error(&error)
+                && state.rotate_device_if_allowed("BATCH_FULL_FAIL")
+            {
                 match fetch_batch_full_once(state, book_id, item_ids).await {
                     Ok(value) => Ok(value),
                     Err(error) => {
@@ -403,7 +425,11 @@ async fn prefetch_and_cache_dedup(
         .clone();
 
     let _guard = lock.lock().await;
-    if state.chapter_cache.get(&chapter_cache_key(book_id, chapter_id)).is_some() {
+    if state
+        .chapter_cache
+        .get(&chapter_cache_key(book_id, chapter_id))
+        .is_some()
+    {
         return Ok(());
     }
 
@@ -426,14 +452,20 @@ async fn do_prefetch_and_cache(
         let Some(item_content) = batch_response.data.get(item_id) else {
             continue;
         };
-        match build_chapter_from_item_content(state, book_id, item_id, item_content, Some(directory)).await {
+        match build_chapter_from_item_content(
+            state,
+            book_id,
+            item_id,
+            item_content,
+            Some(directory),
+        )
+        .await
+        {
             Ok(chapter) => cache_chapter(state, &chapter).await,
             Err(error) => {
                 warn!(
                     "prefetched chapter processing failed: book_id={}, chapter_id={}, reason={}",
-                    book_id,
-                    item_id,
-                    error.message
+                    book_id, item_id, error.message
                 );
             }
         }
@@ -485,7 +517,8 @@ async fn execute_signed_json_get(
 ) -> ServiceResult<Value> {
     let sign = state.signer_client.sign(url, &headers).await?;
     let merged_headers = merge_headers(&headers, &sign.headers)?;
-    let attempt = execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
+    let attempt =
+        execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
     let attempt = if attempt.body_text.trim().is_empty() {
         warn!(
             "upstream returned empty body, retrying over http1: status={}, content_length={}, content_type={}, content_encoding={:?}, url={}",
@@ -545,7 +578,8 @@ async fn build_chapter_from_item_content(
         .clone()
         .ok_or_else(|| ServiceError::internal("章节内容为空/过短"))?;
     let resolve = resolve_register_key(state, item_content.key_version).await?;
-    let html = decrypt_chapter_with_retry(state, &content, item_content.key_version, &resolve).await?;
+    let html =
+        decrypt_chapter_with_retry(state, &content, item_content.key_version, &resolve).await?;
     let text = extract_text(&html);
     if text.trim().is_empty() {
         return Err(ServiceError::internal("章节内容为空/过短"));
@@ -579,8 +613,12 @@ async fn build_chapter_from_item_content(
         chapter_index: context.as_ref().map(|value| value.chapter_index),
         word_count: text.chars().count() as i32,
         update_time: now_ms(),
-        prev_chapter_id: context.as_ref().and_then(|value| value.prev_chapter_id.clone()),
-        next_chapter_id: context.as_ref().and_then(|value| value.next_chapter_id.clone()),
+        prev_chapter_id: context
+            .as_ref()
+            .and_then(|value| value.prev_chapter_id.clone()),
+        next_chapter_id: context
+            .as_ref()
+            .and_then(|value| value.next_chapter_id.clone()),
         is_free: context.as_ref().map(|value| value.is_free),
         txt_content: text,
     })
@@ -588,7 +626,9 @@ async fn build_chapter_from_item_content(
 
 async fn cache_chapter(state: &AppState, chapter: &ChapterInfo) {
     let cache_key = chapter_cache_key(&chapter.book_id, &chapter.chapter_id);
-    state.chapter_cache.insert(cache_key.clone(), chapter.clone());
+    state
+        .chapter_cache
+        .insert(cache_key.clone(), chapter.clone());
     if let Some(pg_cache) = &state.pg_chapter_cache {
         if let Err(error) = pg_cache.put(&cache_key, chapter, now_ms()).await {
             warn!("chapter cache write failed: {error}");
@@ -698,7 +738,10 @@ fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
     ordered
 }
 
-fn build_search_params(device: &DeviceProfile, request: &SearchUpstreamRequest) -> Vec<(String, String)> {
+fn build_search_params(
+    device: &DeviceProfile,
+    request: &SearchUpstreamRequest,
+) -> Vec<(String, String)> {
     let mut params = build_common_params(device);
     params.extend([
         (
@@ -707,20 +750,38 @@ fn build_search_params(device: &DeviceProfile, request: &SearchUpstreamRequest) 
         ),
         ("offset".to_string(), request.offset.to_string()),
         ("from_rs".to_string(), bool01(request.from_rs)),
-        ("user_is_login".to_string(), request.user_is_login.to_string()),
-        ("bookstore_tab".to_string(), request.bookstore_tab.to_string()),
+        (
+            "user_is_login".to_string(),
+            request.user_is_login.to_string(),
+        ),
+        (
+            "bookstore_tab".to_string(),
+            request.bookstore_tab.to_string(),
+        ),
         ("query".to_string(), request.query.clone()),
         ("count".to_string(), request.count.to_string()),
-        ("search_source".to_string(), request.search_source.to_string()),
-        ("clicked_content".to_string(), request.clicked_content.clone()),
-        ("search_source_id".to_string(), request.search_source_id.clone()),
+        (
+            "search_source".to_string(),
+            request.search_source.to_string(),
+        ),
+        (
+            "clicked_content".to_string(),
+            request.clicked_content.clone(),
+        ),
+        (
+            "search_source_id".to_string(),
+            request.search_source_id.clone(),
+        ),
         ("use_lynx".to_string(), bool01(request.use_lynx)),
         ("use_correct".to_string(), bool01(request.use_correct)),
         (
             "last_search_page_interval".to_string(),
             request.last_search_page_interval.to_string(),
         ),
-        ("line_words_num".to_string(), request.line_words_num.to_string()),
+        (
+            "line_words_num".to_string(),
+            request.line_words_num.to_string(),
+        ),
         ("tab_name".to_string(), request.tab_name.clone()),
         (
             "last_consume_interval".to_string(),
@@ -759,15 +820,24 @@ fn build_search_params(device: &DeviceProfile, request: &SearchUpstreamRequest) 
         ),
         ("battery_pct".to_string(), request.battery_pct.to_string()),
         ("down_speed".to_string(), request.down_speed.to_string()),
-        ("sys_dark_mode".to_string(), request.sys_dark_mode.to_string()),
-        ("app_dark_mode".to_string(), request.app_dark_mode.to_string()),
+        (
+            "sys_dark_mode".to_string(),
+            request.sys_dark_mode.to_string(),
+        ),
+        (
+            "app_dark_mode".to_string(),
+            request.app_dark_mode.to_string(),
+        ),
         ("font_scale".to_string(), request.font_scale.to_string()),
         (
             "is_android_pad_screen".to_string(),
             request.is_android_pad_screen.to_string(),
         ),
         ("network_type".to_string(), request.network_type.to_string()),
-        ("current_volume".to_string(), request.current_volume.to_string()),
+        (
+            "current_volume".to_string(),
+            request.current_volume.to_string(),
+        ),
         ("tab_type".to_string(), request.tab_type.to_string()),
         ("passback".to_string(), request.passback.to_string()),
     ]);
@@ -782,10 +852,7 @@ fn build_directory_params(
     let mut params = build_common_params(device);
     params.push(("book_type".to_string(), "0".to_string()));
     params.push(("book_id".to_string(), book_id.to_string()));
-    params.push((
-        "need_version".to_string(),
-        (!minimal).to_string(),
-    ));
+    params.push(("need_version".to_string(), (!minimal).to_string()));
     params
 }
 
@@ -897,14 +964,22 @@ fn parse_book_item(value: &Value) -> BookItem {
         book_name: string_field(value, "book_name"),
         author: string_field(value, "author"),
         description: first_non_blank(&[
-            value.get("abstract").and_then(Value::as_str).unwrap_or_default(),
-            value.get("book_abstract_v2")
+            value
+                .get("abstract")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            value
+                .get("book_abstract_v2")
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         ]),
         cover_url: first_non_blank(&[
-            value.get("thumb_url").and_then(Value::as_str).unwrap_or_default(),
-            value.get("detail_page_thumb_url")
+            value
+                .get("thumb_url")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            value
+                .get("detail_page_thumb_url")
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         ]),
@@ -1063,7 +1138,10 @@ fn chapter_context(directory: &DirectoryResponse, chapter_id: &str) -> Option<Ch
         .item_data_list
         .get(index + 1)
         .map(|item| item.item_id.clone());
-    let title = directory.item_data_list.get(index).map(|item| item.title.clone());
+    let title = directory
+        .item_data_list
+        .get(index)
+        .map(|item| item.title.clone());
     let is_free = directory
         .item_data_list
         .get(index)
@@ -1138,13 +1216,16 @@ fn first_array<'a>(values: &[Option<&'a Value>]) -> Option<&'a [Value]> {
 
 fn search_id_of(value: &Value) -> Option<String> {
     first_non_blank_opt(&[
-        value.get("search_id")
+        value
+            .get("search_id")
             .and_then(Value::as_str)
             .map(ToString::to_string),
-        value.get("searchId")
+        value
+            .get("searchId")
             .and_then(Value::as_str)
             .map(ToString::to_string),
-        value.get("search_id_str")
+        value
+            .get("search_id_str")
             .and_then(Value::as_str)
             .map(ToString::to_string),
     ])
@@ -1341,10 +1422,7 @@ async fn auto_heal_after_error(state: &AppState, reason: &str) {
 
     warn!(
         "auto heal executed: reason={}, rotated={}, restarted_signer={}, device={}",
-        reason,
-        rotated,
-        restarted,
-        current_profile.name
+        reason, rotated, restarted, current_profile.name
     );
 }
 

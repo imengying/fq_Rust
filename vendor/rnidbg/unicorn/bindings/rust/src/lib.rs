@@ -35,20 +35,20 @@ extern crate std;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
+use ansi_term::Color;
 use core::cell::UnsafeCell;
 use core::ptr;
+use libc::c_void;
 use std::prelude::rust_2021::{String, ToString};
 use std::println;
-use ansi_term::Color;
-use libc::c_void;
 
 use ffi::uc_handle;
 
 #[macro_use]
 pub mod unicorn_const;
-pub use unicorn_const::*;
 use capstone::arch;
 use capstone::arch::BuildsCapstone;
+pub use unicorn_const::*;
 
 pub mod ffi; // lets consumers call ffi if desired
 
@@ -412,7 +412,13 @@ impl<'a, D> Unicorn<'a, D> {
         perms: Permission,
     ) -> Result<(), uc_error> {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("mem_map: address=0x{:X}~0x{:X}, size={}, perms={:?}", address, address + size as u64, size, perms);
+            println!(
+                "mem_map: address=0x{:X}~0x{:X}, size={}, perms={:?}",
+                address,
+                address + size as u64,
+                size,
+                perms
+            );
         }
         unsafe { ffi::uc_mem_map(self.get_handle(), address, size, perms.bits()) }.into()
     }
@@ -561,8 +567,7 @@ impl<'a, D> Unicorn<'a, D> {
         //if reg_id == RegisterARM64::SP.value() && value == 0 {
         //    panic!("reg_write: regid={}, value={}", reg_id, value);
         //}
-        unsafe { ffi::uc_reg_write(self.get_handle(), reg_id, &value as *const _ as _) }
-            .into()
+        unsafe { ffi::uc_reg_write(self.get_handle(), reg_id, &value as *const _ as _) }.into()
     }
 
     pub fn reg_write_i32<T: Into<i32>>(&self, regid: T, value: i32) -> Result<(), uc_error> {
@@ -630,107 +635,228 @@ impl<'a, D> Unicorn<'a, D> {
     }
 
     pub fn dump_context(&self, addr: u64, size: usize) {
-        println!("{} {}", Color::Red.paint("Dump context at"), Color::Blue.paint(format!("{:#016x}", addr)));
-        let pc  = self.reg_read(RegisterARM64::PC  as i32).expect("failed to read PC");
-        let sp  = self.reg_read(RegisterARM64::SP  as i32).expect("failed to read SP" );
-        let lr  = self.reg_read(RegisterARM64::LR  as i32).expect("failed to read LR" );
-        let r0  = self.reg_read(RegisterARM64::X0  as i32).expect("failed to read x0" );
-        let r1  = self.reg_read(RegisterARM64::X1  as i32).expect("failed to read x1" );
-        let r2  = self.reg_read(RegisterARM64::X2  as i32).expect("failed to read x2" );
-        let r3  = self.reg_read(RegisterARM64::X3  as i32).expect("failed to read x3" );
-        let r4  = self.reg_read(RegisterARM64::X4  as i32).expect("failed to read x4" );
-        let r5  = self.reg_read(RegisterARM64::X5  as i32).expect("failed to read x5" );
-        let r6  = self.reg_read(RegisterARM64::X6  as i32).expect("failed to read x6" );
-        let r7  = self.reg_read(RegisterARM64::X7  as i32).expect("failed to read x7" );
-        let r8  = self.reg_read(RegisterARM64::X8  as i32).expect("failed to read x8" );
-        let r9  = self.reg_read(RegisterARM64::X9  as i32).expect("failed to read x9" );
-        let r10 = self.reg_read(RegisterARM64::X10 as i32).expect("failed to read x10");
-        let r11 = self.reg_read(RegisterARM64::X11 as i32).expect("failed to read x11");
-        let r12 = self.reg_read(RegisterARM64::X12 as i32).expect("failed to read x12");
-        let r13 = self.reg_read(RegisterARM64::X13 as i32).expect("failed to read x13");
-        let r14 = self.reg_read(RegisterARM64::X14 as i32).expect("failed to read x14");
-        let r15 = self.reg_read(RegisterARM64::X15 as i32).expect("failed to read x15");
-        let r16 = self.reg_read(RegisterARM64::X16 as i32).expect("failed to read x15");
-        let r18 = self.reg_read(RegisterARM64::X18 as i32).expect("failed to read x18");
-        let r19 = self.reg_read(RegisterARM64::X19 as i32).expect("failed to read x19");
-        let r20 = self.reg_read(RegisterARM64::X20 as i32).expect("failed to read x20");
-        let r21 = self.reg_read(RegisterARM64::X21 as i32).expect("failed to read x21");
-        let r22 = self.reg_read(RegisterARM64::X22 as i32).expect("failed to read x22");
-        let r23 = self.reg_read(RegisterARM64::X23 as i32).expect("failed to read x23");
-        let r24 = self.reg_read(RegisterARM64::X24 as i32).expect("failed to read x24");
-        let r25 = self.reg_read(RegisterARM64::X25 as i32).expect("failed to read x25");
-        let r26 = self.reg_read(RegisterARM64::X26 as i32).expect("failed to read x26");
-        let r27 = self.reg_read(RegisterARM64::X27 as i32).expect("failed to read x27");
-        let r28 = self.reg_read(RegisterARM64::X28 as i32).expect("failed to read x28");
-        let r29 = self.reg_read(RegisterARM64::X29 as i32).expect("failed to read x28");
-        let r30 = self.reg_read(RegisterARM64::X30 as i32).expect("failed to read x28");
+        println!(
+            "{} {}",
+            Color::Red.paint("Dump context at"),
+            Color::Blue.paint(format!("{:#016x}", addr))
+        );
+        let pc = self
+            .reg_read(RegisterARM64::PC as i32)
+            .expect("failed to read PC");
+        let sp = self
+            .reg_read(RegisterARM64::SP as i32)
+            .expect("failed to read SP");
+        let lr = self
+            .reg_read(RegisterARM64::LR as i32)
+            .expect("failed to read LR");
+        let r0 = self
+            .reg_read(RegisterARM64::X0 as i32)
+            .expect("failed to read x0");
+        let r1 = self
+            .reg_read(RegisterARM64::X1 as i32)
+            .expect("failed to read x1");
+        let r2 = self
+            .reg_read(RegisterARM64::X2 as i32)
+            .expect("failed to read x2");
+        let r3 = self
+            .reg_read(RegisterARM64::X3 as i32)
+            .expect("failed to read x3");
+        let r4 = self
+            .reg_read(RegisterARM64::X4 as i32)
+            .expect("failed to read x4");
+        let r5 = self
+            .reg_read(RegisterARM64::X5 as i32)
+            .expect("failed to read x5");
+        let r6 = self
+            .reg_read(RegisterARM64::X6 as i32)
+            .expect("failed to read x6");
+        let r7 = self
+            .reg_read(RegisterARM64::X7 as i32)
+            .expect("failed to read x7");
+        let r8 = self
+            .reg_read(RegisterARM64::X8 as i32)
+            .expect("failed to read x8");
+        let r9 = self
+            .reg_read(RegisterARM64::X9 as i32)
+            .expect("failed to read x9");
+        let r10 = self
+            .reg_read(RegisterARM64::X10 as i32)
+            .expect("failed to read x10");
+        let r11 = self
+            .reg_read(RegisterARM64::X11 as i32)
+            .expect("failed to read x11");
+        let r12 = self
+            .reg_read(RegisterARM64::X12 as i32)
+            .expect("failed to read x12");
+        let r13 = self
+            .reg_read(RegisterARM64::X13 as i32)
+            .expect("failed to read x13");
+        let r14 = self
+            .reg_read(RegisterARM64::X14 as i32)
+            .expect("failed to read x14");
+        let r15 = self
+            .reg_read(RegisterARM64::X15 as i32)
+            .expect("failed to read x15");
+        let r16 = self
+            .reg_read(RegisterARM64::X16 as i32)
+            .expect("failed to read x15");
+        let r18 = self
+            .reg_read(RegisterARM64::X18 as i32)
+            .expect("failed to read x18");
+        let r19 = self
+            .reg_read(RegisterARM64::X19 as i32)
+            .expect("failed to read x19");
+        let r20 = self
+            .reg_read(RegisterARM64::X20 as i32)
+            .expect("failed to read x20");
+        let r21 = self
+            .reg_read(RegisterARM64::X21 as i32)
+            .expect("failed to read x21");
+        let r22 = self
+            .reg_read(RegisterARM64::X22 as i32)
+            .expect("failed to read x22");
+        let r23 = self
+            .reg_read(RegisterARM64::X23 as i32)
+            .expect("failed to read x23");
+        let r24 = self
+            .reg_read(RegisterARM64::X24 as i32)
+            .expect("failed to read x24");
+        let r25 = self
+            .reg_read(RegisterARM64::X25 as i32)
+            .expect("failed to read x25");
+        let r26 = self
+            .reg_read(RegisterARM64::X26 as i32)
+            .expect("failed to read x26");
+        let r27 = self
+            .reg_read(RegisterARM64::X27 as i32)
+            .expect("failed to read x27");
+        let r28 = self
+            .reg_read(RegisterARM64::X28 as i32)
+            .expect("failed to read x28");
+        let r29 = self
+            .reg_read(RegisterARM64::X29 as i32)
+            .expect("failed to read x28");
+        let r30 = self
+            .reg_read(RegisterARM64::X30 as i32)
+            .expect("failed to read x28");
 
-        let cpacr_el1 = self.reg_read(RegisterARM64::CPACR_EL1 as i32).expect("failed to read CPACR_EL1");
-        println!("{} : {}   {} : {}    {}: {}    {}: {}",
-            Color::Green.paint("$x0"), Color::Blue.paint(format!("{:#016x}", r0)),
-            Color::Green.paint("$x1"), Color::Blue.paint(format!("{:#016x}", r1)),
-            Color::Green.paint("$x2"), Color::Blue.paint(format!("{:#016x}", r2)),
-            Color::Green.paint("$x3"), Color::Blue.paint(format!("{:#016x}", r3))
+        let cpacr_el1 = self
+            .reg_read(RegisterARM64::CPACR_EL1 as i32)
+            .expect("failed to read CPACR_EL1");
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}",
+            Color::Green.paint("$x0"),
+            Color::Blue.paint(format!("{:#016x}", r0)),
+            Color::Green.paint("$x1"),
+            Color::Blue.paint(format!("{:#016x}", r1)),
+            Color::Green.paint("$x2"),
+            Color::Blue.paint(format!("{:#016x}", r2)),
+            Color::Green.paint("$x3"),
+            Color::Blue.paint(format!("{:#016x}", r3))
         );
-        println!("{} : {}   {} : {}    {}: {}    {}: {}",
-            Color::Green.paint("$x4"), Color::Blue.paint(format!("{:#016x}", r4)),
-            Color::Green.paint("$x5"), Color::Blue.paint(format!("{:#016x}", r5)),
-            Color::Green.paint("$x6"), Color::Blue.paint(format!("{:#016x}", r6)),
-            Color::Green.paint("$x7"), Color::Blue.paint(format!("{:#016x}", r7))
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}",
+            Color::Green.paint("$x4"),
+            Color::Blue.paint(format!("{:#016x}", r4)),
+            Color::Green.paint("$x5"),
+            Color::Blue.paint(format!("{:#016x}", r5)),
+            Color::Green.paint("$x6"),
+            Color::Blue.paint(format!("{:#016x}", r6)),
+            Color::Green.paint("$x7"),
+            Color::Blue.paint(format!("{:#016x}", r7))
         );
-        println!("{} : {}   {} : {}    {}: {}    {}: {}",
-            Color::Green.paint("$x8"), Color::Blue.paint(format!("{:#016x}", r8)),
-            Color::Green.paint("$x9"), Color::Blue.paint(format!("{:#016x}", r9)),
-            Color::Green.paint("$x10"), Color::Blue.paint(format!("{:#016x}", r10)),
-            Color::Green.paint("$x11"), Color::Blue.paint(format!("{:#016x}", r11))
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}",
+            Color::Green.paint("$x8"),
+            Color::Blue.paint(format!("{:#016x}", r8)),
+            Color::Green.paint("$x9"),
+            Color::Blue.paint(format!("{:#016x}", r9)),
+            Color::Green.paint("$x10"),
+            Color::Blue.paint(format!("{:#016x}", r10)),
+            Color::Green.paint("$x11"),
+            Color::Blue.paint(format!("{:#016x}", r11))
         );
-        println!("{} : {}   {} : {}    {}: {}    {}: {}    {}: {} ",
-            Color::Green.paint("$x12"), Color::Blue.paint(format!("{:#016x}", r12)),
-            Color::Green.paint("$x13"), Color::Blue.paint(format!("{:#016x}", r13)),
-            Color::Green.paint("$x14"), Color::Blue.paint(format!("{:#016x}", r14)),
-            Color::Green.paint("$x15"), Color::Blue.paint(format!("{:#016x}", r15)),
-            Color::Green.paint("$x16"), Color::Blue.paint(format!("{:#016x}", r16)),
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}    {}: {} ",
+            Color::Green.paint("$x12"),
+            Color::Blue.paint(format!("{:#016x}", r12)),
+            Color::Green.paint("$x13"),
+            Color::Blue.paint(format!("{:#016x}", r13)),
+            Color::Green.paint("$x14"),
+            Color::Blue.paint(format!("{:#016x}", r14)),
+            Color::Green.paint("$x15"),
+            Color::Blue.paint(format!("{:#016x}", r15)),
+            Color::Green.paint("$x16"),
+            Color::Blue.paint(format!("{:#016x}", r16)),
         );
-        println!("{} : {}   {} : {}    {}: {}    {}: {}",
-            Color::Green.paint("$x18"), Color::Blue.paint(format!("{:#016x}", r18)),
-            Color::Green.paint("$x19"), Color::Blue.paint(format!("{:#016x}", r19)),
-            Color::Green.paint("$x20"), Color::Blue.paint(format!("{:#016x}", r20)),
-            Color::Green.paint("$x21"), Color::Blue.paint(format!("{:#016x}", r21))
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}",
+            Color::Green.paint("$x18"),
+            Color::Blue.paint(format!("{:#016x}", r18)),
+            Color::Green.paint("$x19"),
+            Color::Blue.paint(format!("{:#016x}", r19)),
+            Color::Green.paint("$x20"),
+            Color::Blue.paint(format!("{:#016x}", r20)),
+            Color::Green.paint("$x21"),
+            Color::Blue.paint(format!("{:#016x}", r21))
         );
-        println!("{} : {}   {} : {}    {}: {}    {}: {}",
-            Color::Green.paint("$x22"), Color::Blue.paint(format!("{:#016x}", r22)),
-            Color::Green.paint("$x23"), Color::Blue.paint(format!("{:#016x}", r23)),
-            Color::Green.paint("$x24"), Color::Blue.paint(format!("{:#016x}", r24)),
-            Color::Green.paint("$x25"), Color::Blue.paint(format!("{:#016x}", r25))
+        println!(
+            "{} : {}   {} : {}    {}: {}    {}: {}",
+            Color::Green.paint("$x22"),
+            Color::Blue.paint(format!("{:#016x}", r22)),
+            Color::Green.paint("$x23"),
+            Color::Blue.paint(format!("{:#016x}", r23)),
+            Color::Green.paint("$x24"),
+            Color::Blue.paint(format!("{:#016x}", r24)),
+            Color::Green.paint("$x25"),
+            Color::Blue.paint(format!("{:#016x}", r25))
         );
-        println!("{} : {}   {} : {}    {}: {}",
-            Color::Green.paint("$x26"), Color::Blue.paint(format!("{:#016x}", r26)),
-            Color::Green.paint("$x27"), Color::Blue.paint(format!("{:#016x}", r27)),
-            Color::Green.paint("$x28"), Color::Blue.paint(format!("{:#016x}", r28))
+        println!(
+            "{} : {}   {} : {}    {}: {}",
+            Color::Green.paint("$x26"),
+            Color::Blue.paint(format!("{:#016x}", r26)),
+            Color::Green.paint("$x27"),
+            Color::Blue.paint(format!("{:#016x}", r27)),
+            Color::Green.paint("$x28"),
+            Color::Blue.paint(format!("{:#016x}", r28))
         );
-        println!("{} : {}   {} : {} ",
-                 Color::Green.paint("$sp"), Color::Blue.paint(format!("{:#016x}", sp)),
-                 Color::Green.paint("$lr"), Color::Blue.paint(format!("{:#016x}", lr)),
+        println!(
+            "{} : {}   {} : {} ",
+            Color::Green.paint("$sp"),
+            Color::Blue.paint(format!("{:#016x}", sp)),
+            Color::Green.paint("$lr"),
+            Color::Blue.paint(format!("{:#016x}", lr)),
         );
-        println!("{} : {}   {} : {} ",
-                 Color::Green.paint("$x29"), Color::Blue.paint(format!("{:#016x}", r29)),
-                 Color::Green.paint("$x30"), Color::Blue.paint(format!("{:#016x}", r30)),
+        println!(
+            "{} : {}   {} : {} ",
+            Color::Green.paint("$x29"),
+            Color::Blue.paint(format!("{:#016x}", r29)),
+            Color::Green.paint("$x30"),
+            Color::Blue.paint(format!("{:#016x}", r30)),
         );
-        println!("{} : {}",
-            Color::Green.paint("$cpacr_el1"), Color::Blue.paint(format!("{:#016x}", cpacr_el1))
+        println!(
+            "{} : {}",
+            Color::Green.paint("$cpacr_el1"),
+            Color::Blue.paint(format!("{:#016x}", cpacr_el1))
         );
 
         let mut buf = vec![0; size + 40];
         if pc != 0 {
-            self.mem_read(pc, &mut buf).expect("failed to read opcode from memory");
+            self.mem_read(pc, &mut buf)
+                .expect("failed to read opcode from memory");
             let cs_arm: capstone::Capstone = capstone::Capstone::new()
                 .arm64()
                 .mode(arch::arm64::ArchMode::Arm)
                 .detail(true)
-                .build().expect("failed to create capstone for ARM");
+                .build()
+                .expect("failed to create capstone for ARM");
 
             let ins = cs_arm.disasm_all(&buf, size as u64).unwrap();
-            println!("{}: {}", Color::Green.paint("$pc"), Color::Blue.paint(format!("{:#016x}", pc)));
+            println!(
+                "{}: {}",
+                Color::Green.paint("$pc"),
+                Color::Blue.paint(format!("{:#016x}", pc))
+            );
             println!("asm:\n{}", Color::Purple.paint(format!("{}", ins)));
         }
 
@@ -939,11 +1065,11 @@ impl<'a, D> Unicorn<'a, D> {
             }
             err
         }
-            .and_then(|| {
-                let hook_id = UcHookId(hook_id);
-                self.inner_mut().hooks.push((hook_id, user_data));
-                Ok(hook_id)
-            })
+        .and_then(|| {
+            let hook_id = UcHookId(hook_id);
+            self.inner_mut().hooks.push((hook_id, user_data));
+            Ok(hook_id)
+        })
     }
 
     /// Add hook for invalid instructions
@@ -1120,8 +1246,7 @@ impl<'a, D> Unicorn<'a, D> {
 
     pub fn has_hook(&self, hook_id: &UcHookId) -> bool {
         let inner = self.inner_mut();
-        let a = inner.hooks.iter()
-            .find(|hook| hook.0 == *hook_id);
+        let a = inner.hooks.iter().find(|hook| hook.0 == *hook_id);
         a.is_some()
     }
 
@@ -1186,12 +1311,11 @@ impl<'a, D> Unicorn<'a, D> {
         unsafe { ffi::uc_emu_start(self.get_handle(), begin, until, timeout, count as _) }.into()
     }
 
-
     /// Stop the emulation.
     ///
     /// This is usually called from callback function in hooks.
     /// NOTE: For now, this will stop the execution only after the current block.
-    pub fn emu_stop(& self) -> Result<(), uc_error> {
+    pub fn emu_stop(&self) -> Result<(), uc_error> {
         unsafe { ffi::uc_emu_stop(self.get_handle()).into() }
     }
 

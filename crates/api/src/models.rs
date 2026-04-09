@@ -46,7 +46,10 @@ pub struct BookItem {
 pub struct DirectoryResponse {
     #[serde(rename = "ban_recover", skip_serializing_if = "Option::is_none")]
     pub ban_recover: Option<bool>,
-    #[serde(rename = "additional_item_data_list", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "additional_item_data_list",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub additional_item_data_list: Option<serde_json::Value>,
     #[serde(rename = "catalog_data", skip_serializing_if = "Option::is_none")]
     pub catalog_data: Option<Vec<CatalogItem>>,
@@ -56,7 +59,12 @@ pub struct DirectoryResponse {
     pub field_cache_status: Option<serde_json::Value>,
     #[serde(rename = "book_info", skip_serializing_if = "Option::is_none")]
     pub book_info: Option<UpstreamBookInfo>,
-    #[serde(rename = "serial_count", deserialize_with = "flexible_opt_i32", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "serial_count",
+        deserialize_with = "flexible_opt_i32",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub serial_count: Option<i32>,
 }
 
@@ -75,15 +83,33 @@ pub struct DirectoryItemData {
     #[serde(rename = "item_id")]
     pub item_id: String,
     pub title: String,
-    #[serde(rename = "chapter_index", deserialize_with = "flexible_opt_i32", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chapter_index",
+        deserialize_with = "flexible_opt_i32",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chapter_index: Option<i32>,
     #[serde(rename = "is_latest", skip_serializing_if = "Option::is_none")]
     pub is_latest: Option<bool>,
-    #[serde(rename = "first_pass_time", deserialize_with = "flexible_opt_i32", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "first_pass_time",
+        deserialize_with = "flexible_opt_i32",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub first_pass_time: Option<i32>,
-    #[serde(rename = "first_pass_time_str", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "first_pass_time_str",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub first_pass_time_str: Option<String>,
-    #[serde(rename = "sort_order", deserialize_with = "flexible_opt_i32", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "sort_order",
+        deserialize_with = "flexible_opt_i32",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sort_order: Option<i32>,
     #[serde(rename = "is_free", skip_serializing_if = "Option::is_none")]
     pub is_free: Option<bool>,
@@ -107,7 +133,11 @@ pub struct UpstreamBookInfo {
     pub category: Option<String>,
     #[serde(deserialize_with = "flexible_opt_i32", default)]
     pub status: Option<i32>,
-    #[serde(rename = "serial_count", deserialize_with = "flexible_opt_i32", default)]
+    #[serde(
+        rename = "serial_count",
+        deserialize_with = "flexible_opt_i32",
+        default
+    )]
     pub serial_count: Option<i32>,
 }
 
@@ -138,7 +168,11 @@ pub struct ChapterInfo {
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_content: Option<String>,
-    #[serde(deserialize_with = "flexible_opt_i32", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "flexible_opt_i32",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chapter_index: Option<i32>,
     #[serde(deserialize_with = "flexible_i32", default)]
     pub word_count: i32,
@@ -196,27 +230,40 @@ impl<T> ApiResponse<T> {
 fn flexible_i32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     match &value {
-        serde_json::Value::Number(n) => n.as_i64().map(|v| v as i32).ok_or_else(|| serde::de::Error::custom("invalid number")),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(|v| v as i32)
+            .ok_or_else(|| serde::de::Error::custom("invalid number")),
         serde_json::Value::String(s) => s.parse::<i32>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom(format!("expected number or string, got {value}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {value}"
+        ))),
     }
 }
 
 fn flexible_i64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     match &value {
-        serde_json::Value::Number(n) => n.as_i64().ok_or_else(|| serde::de::Error::custom("invalid number")),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("invalid number")),
         serde_json::Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom(format!("expected number or string, got {value}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {value}"
+        ))),
     }
 }
 
 fn flexible_u64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
     match &value {
-        serde_json::Value::Number(n) => n.as_u64().ok_or_else(|| serde::de::Error::custom("invalid number")),
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("invalid number")),
         serde_json::Value::String(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom(format!("expected number or string, got {value}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {value}"
+        ))),
     }
 }
 
@@ -226,8 +273,12 @@ fn flexible_opt_i32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => Ok(Some(n.as_i64().unwrap_or(0) as i32)),
         Some(serde_json::Value::String(s)) if s.is_empty() => Ok(None),
-        Some(serde_json::Value::String(s)) => s.parse::<i32>().map(Some).map_err(serde::de::Error::custom),
-        Some(other) => Err(serde::de::Error::custom(format!("expected number or string, got {other}"))),
+        Some(serde_json::Value::String(s)) => {
+            s.parse::<i32>().map(Some).map_err(serde::de::Error::custom)
+        }
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {other}"
+        ))),
     }
 }
 
@@ -237,8 +288,11 @@ fn flexible_opt_u64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => Ok(Some(n.as_u64().unwrap_or(0))),
         Some(serde_json::Value::String(s)) if s.is_empty() => Ok(None),
-        Some(serde_json::Value::String(s)) => s.parse::<u64>().map(Some).map_err(serde::de::Error::custom),
-        Some(other) => Err(serde::de::Error::custom(format!("expected number or string, got {other}"))),
+        Some(serde_json::Value::String(s)) => {
+            s.parse::<u64>().map(Some).map_err(serde::de::Error::custom)
+        }
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected number or string, got {other}"
+        ))),
     }
 }
-

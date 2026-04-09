@@ -1,4 +1,4 @@
-use std::hash::{Hash};
+use std::hash::Hash;
 
 pub enum DvmMember {
     Field(DvmField),
@@ -30,7 +30,7 @@ impl DvmMethod {
             class,
             name,
             fn_ptr,
-            signature
+            signature,
         }
     }
 
@@ -63,5 +63,4 @@ impl DvmField {
 fn test_dvm_signature() {
     let signature = "(Ljava/lang/String;I)V";
     let method = DvmMethod::new(0, 0, "test".to_string(), signature.to_string(), 0);
-
 }

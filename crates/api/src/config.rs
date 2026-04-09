@@ -283,10 +283,7 @@ impl AppConfig {
             &mut self.fq.signer.android_sdk_api,
             "FQRS_SIGNER_ANDROID_SDK_API",
         );
-        set_u64(
-            &mut self.fq.cache.book_ttl_ms,
-            "FQRS_BOOK_CACHE_TTL_MS",
-        );
+        set_u64(&mut self.fq.cache.book_ttl_ms, "FQRS_BOOK_CACHE_TTL_MS");
         set_bool(&mut self.fq.prefetch.enabled, "FQRS_PREFETCH_ENABLED");
         set_usize(
             &mut self.fq.prefetch.chapter_size,
@@ -355,7 +352,6 @@ impl AppConfig {
 
         self.fq.device_profile.inherit_missing_from(&bootstrap);
     }
-
 }
 
 impl UpstreamConfig {

@@ -243,7 +243,12 @@ fn resolve_resource_root() -> String {
 
     materialize_embedded_runtime()
         .map(|layout| layout.resource_root.to_string_lossy().to_string())
-        .unwrap_or_else(|_| std::env::temp_dir().join("fq-rust-embedded-runtime/resources").to_string_lossy().to_string())
+        .unwrap_or_else(|_| {
+            std::env::temp_dir()
+                .join("fq-rust-embedded-runtime/resources")
+                .to_string_lossy()
+                .to_string()
+        })
 }
 
 fn resolve_rnidbg_base_path(fallback: &Path) -> PathBuf {
@@ -254,9 +259,9 @@ fn resolve_rnidbg_base_path(fallback: &Path) -> PathBuf {
 }
 
 fn materialize_embedded_runtime() -> Result<EmbeddedRuntimeLayout> {
-    match EMBEDDED_RUNTIME.get_or_init(|| {
-        materialize_embedded_runtime_once().map_err(|error| error.to_string())
-    }) {
+    match EMBEDDED_RUNTIME
+        .get_or_init(|| materialize_embedded_runtime_once().map_err(|error| error.to_string()))
+    {
         Ok(layout) => Ok(layout.clone()),
         Err(error) => Err(anyhow!(error.clone())),
     }

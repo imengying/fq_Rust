@@ -1,12 +1,14 @@
-use std::sync::atomic::AtomicI32;
+use crate::backend::RegisterARM64;
+use crate::emulator::func::FunctionCall;
+use crate::emulator::memory::{MemoryBlock, MemoryBlockTrait};
+use crate::emulator::signal::{ISignalTask, SignalOps, UnixSigSet};
+use crate::emulator::thread::{
+    BaseTask, CoveredTaskSignalOps, DestroyListener, RunnableTask, TaskStatus, Waiter,
+};
+use crate::emulator::{AndroidEmulator, VMPointer};
 use anyhow::anyhow;
 use bytes::{Buf, BufMut, BytesMut};
-use crate::backend::RegisterARM64;
-use crate::emulator::memory::{MemoryBlockTrait, MemoryBlock};
-use crate::emulator::signal::{ISignalTask, SignalOps, UnixSigSet};
-use crate::emulator::{AndroidEmulator, VMPointer};
-use crate::emulator::func::FunctionCall;
-use crate::emulator::thread::{BaseTask, CoveredTaskSignalOps, DestroyListener, RunnableTask, TaskStatus, Waiter};
+use std::sync::atomic::AtomicI32;
 
 pub const SA_SIGINFO: i32 = 0x00000004;
 
@@ -18,11 +20,15 @@ pub struct SignalTask<'a, T: Clone> {
     stack: Option<VMPointer<'a, T>>,
     ucontext: Option<MemoryBlock<'a, T>>,
     info_block: Option<MemoryBlock<'a, T>>,
-    base_task: BaseTask<'a, T>
+    base_task: BaseTask<'a, T>,
 }
 
 impl<'a, T: Clone> SignalTask<'a, T> {
-    pub fn new(sig_num: i32, sig_action: SigAction64<'a, T>, sig_info: Option<VMPointer<'a, T>>) -> Self {
+    pub fn new(
+        sig_num: i32,
+        sig_action: SigAction64<'a, T>,
+        sig_info: Option<VMPointer<'a, T>>,
+    ) -> Self {
         Self {
             sig_action,
             sig_num,
@@ -31,7 +37,7 @@ impl<'a, T: Clone> SignalTask<'a, T> {
             stack: None,
             ucontext: None,
             info_block: None,
-            base_task: BaseTask::new()
+            base_task: BaseTask::new(),
         }
     }
 
@@ -41,7 +47,10 @@ impl<'a, T: Clone> SignalTask<'a, T> {
             self.stack = Some(self.base_task.allocate_stack(&emulator));
         }
 
-        if (self.sig_action.sa_flags & SA_SIGINFO) != 0 && self.info_block.is_none() && self.sig_info.is_none() {
+        if (self.sig_action.sa_flags & SA_SIGINFO) != 0
+            && self.info_block.is_none()
+            && self.sig_info.is_none()
+        {
             self.info_block = Some(emulator.malloc(128, false)?);
             if let Some(info_block) = &self.info_block {
                 info_block.pointer.write_i32_with_offset(0, self.sig_num)?;
@@ -53,11 +62,24 @@ impl<'a, T: Clone> SignalTask<'a, T> {
             self.ucontext = Some(emulator.malloc(0x1000, false)?);
         }
 
-        backend.reg_write(RegisterARM64::SP, self.stack.as_ref().unwrap().addr).map_err(|e| anyhow!("failed to write SP: {:?}", e))?;
-        backend.reg_write(RegisterARM64::X0, self.sig_num as u64).map_err(|e| anyhow!("failed to write X0: {:?}", e))?;
-        backend.reg_write(RegisterARM64::X1, self.sig_info.as_ref().unwrap().addr).map_err(|e| anyhow!("failed to write X1: {:?}", e))?;
-        backend.reg_write(RegisterARM64::X2, self.ucontext.as_ref().unwrap().pointer.addr).map_err(|e| anyhow!("failed to write X2: {:?}", e))?;
-        backend.reg_write(RegisterARM64::LR, emulator.get_lr()?).map_err(|e| anyhow!("failed to write LR: {:?}", e))?;
+        backend
+            .reg_write(RegisterARM64::SP, self.stack.as_ref().unwrap().addr)
+            .map_err(|e| anyhow!("failed to write SP: {:?}", e))?;
+        backend
+            .reg_write(RegisterARM64::X0, self.sig_num as u64)
+            .map_err(|e| anyhow!("failed to write X0: {:?}", e))?;
+        backend
+            .reg_write(RegisterARM64::X1, self.sig_info.as_ref().unwrap().addr)
+            .map_err(|e| anyhow!("failed to write X1: {:?}", e))?;
+        backend
+            .reg_write(
+                RegisterARM64::X2,
+                self.ucontext.as_ref().unwrap().pointer.addr,
+            )
+            .map_err(|e| anyhow!("failed to write X2: {:?}", e))?;
+        backend
+            .reg_write(RegisterARM64::LR, emulator.get_lr()?)
+            .map_err(|e| anyhow!("failed to write LR: {:?}", e))?;
 
         Ok(emulator.emulate(self.sig_action.sa_handler, emulator.get_lr().unwrap()))
     }
@@ -108,7 +130,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for SignalTask<'a, T> {
         self.base_task.push_function(emulator, call)
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         self.base_task.pop_function(emulator, address)
     }
 
@@ -122,13 +148,20 @@ impl<'a, T: Clone> RunnableTask<'a, T> for SignalTask<'a, T> {
 }
 
 impl<'a, T: Clone> ISignalTask<'a, T> for SignalTask<'a, T> {
-    fn call_handler(&mut self, signal_ops: &mut CoveredTaskSignalOps, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn call_handler(
+        &mut self,
+        signal_ops: &mut CoveredTaskSignalOps,
+        emulator: &AndroidEmulator<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         let mut sig_set = signal_ops.get_sig_mask_set();
         if sig_set.is_none() {
             let new_sig_set = UnixSigSet::new(self.sig_action.sa_mask);
             signal_ops.set_sig_mask_set(Box::new(new_sig_set));
         } else {
-            sig_set.as_mut().unwrap().block_sig_set(self.sig_action.sa_mask);
+            sig_set
+                .as_mut()
+                .unwrap()
+                .block_sig_set(self.sig_action.sa_mask);
         }
 
         let ret = if self.is_context_saved() {
@@ -157,29 +190,35 @@ impl<'a, T: Clone> Drop for SignalTask<'a, T> {
     }
 }
 
-
 // "sa_handler", "sa_flags", "sa_mask", "sa_restorer"
 pub struct SigAction64<'a, T: Clone> {
     pub sa_handler: u64,
     pub sa_flags: i32,
     pub sa_restorer: u64,
     pub sa_mask: u64,
-    pub pointer: VMPointer<'a, T>
+    pub pointer: VMPointer<'a, T>,
 }
 
 impl<'a, T: Clone> SigAction64<'a, T> {
-    pub fn new(pointer: VMPointer<'a, T>, sa_handler: u64, sa_flags: i32, sa_restorer: u64, sa_mask: u64) -> Self {
+    pub fn new(
+        pointer: VMPointer<'a, T>,
+        sa_handler: u64,
+        sa_flags: i32,
+        sa_restorer: u64,
+        sa_mask: u64,
+    ) -> Self {
         Self {
             sa_handler,
             sa_flags,
             sa_restorer,
             sa_mask,
-            pointer
+            pointer,
         }
     }
 
     pub fn from(pointer: VMPointer<'a, T>) -> Self {
-        let data = pointer.read_bytes_with_len(32)
+        let data = pointer
+            .read_bytes_with_len(32)
             .expect("Try read sigaction64 failed");
         let mut buf = BytesMut::from(data.as_slice());
         let sa_handler = buf.get_u64_le();
@@ -192,7 +231,7 @@ impl<'a, T: Clone> SigAction64<'a, T> {
             sa_flags,
             sa_restorer,
             sa_mask,
-            pointer
+            pointer,
         }
     }
 
@@ -203,7 +242,9 @@ impl<'a, T: Clone> SigAction64<'a, T> {
         buf.put_u32_le(0);
         buf.put_u64_le(self.sa_mask);
         buf.put_u64_le(self.sa_restorer);
-        self.pointer.write_bytes(buf.freeze()).expect("Try pack sigaction64 failed");
+        self.pointer
+            .write_bytes(buf.freeze())
+            .expect("Try pack sigaction64 failed");
     }
 }
 

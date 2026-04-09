@@ -1,7 +1,7 @@
-use crate::emulator::AndroidEmulator;
 use crate::emulator::func::FunctionCall;
 use crate::emulator::signal::{SavableSignalTask, SignalTask};
-use crate::emulator::thread::{*};
+use crate::emulator::thread::*;
+use crate::emulator::AndroidEmulator;
 
 pub enum AbstractTask<'a, T: Clone> {
     Function64(Function64<'a, T>),
@@ -77,7 +77,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseMainTask<'a, T> {
         self.covered_task.push_function(emulator, call);
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         self.covered_task.pop_function(emulator, address)
     }
 
@@ -90,14 +94,20 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseMainTask<'a, T> {
     }
 }
 
-impl<'a, T: Clone> Task<'a, T> for BaseMainTask<'a, T>  {
+impl<'a, T: Clone> Task<'a, T> for BaseMainTask<'a, T> {
     fn get_id(&self) -> u32 {
         self.covered_task.get_id()
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         if self.is_context_saved() {
-            let ret = self.covered_task.base_task
+            let ret = self
+                .covered_task
+                .base_task
                 .continue_run(emulator, self.until);
             return Ok(ret);
         }

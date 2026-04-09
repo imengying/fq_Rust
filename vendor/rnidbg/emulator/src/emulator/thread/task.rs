@@ -1,12 +1,16 @@
-use crate::emulator::AndroidEmulator;
 use crate::emulator::signal::{SavableSignalTask, SignalTask};
-use crate::emulator::thread::{CoveredTaskSignalOps, RunnableTask};
 use crate::emulator::thread::main_task::LuoTask;
+use crate::emulator::thread::{CoveredTaskSignalOps, RunnableTask};
+use crate::emulator::AndroidEmulator;
 
 pub trait Task<'a, T: Clone>: RunnableTask<'a, T> {
     fn get_id(&self) -> u32;
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>>;
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>>;
 
     fn dispatch(&mut self, emulator: &AndroidEmulator<'a, T>) -> anyhow::Result<Option<u64>>;
 
@@ -24,4 +28,3 @@ pub trait Task<'a, T: Clone>: RunnableTask<'a, T> {
 
     fn signal_ops_mut(&self) -> &mut CoveredTaskSignalOps;
 }
-

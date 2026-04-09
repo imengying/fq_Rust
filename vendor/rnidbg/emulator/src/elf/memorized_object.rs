@@ -1,7 +1,7 @@
+use anyhow::anyhow;
 use std::cell::{Ref, RefCell, UnsafeCell};
 use std::fmt::Debug;
 use std::rc::Rc;
-use anyhow::anyhow;
 
 enum MemoizedObjectData<T> {
     Value(Option<T>),
@@ -31,7 +31,9 @@ impl<T> MemoizedObject<T> {
         F: 'static + Fn() -> anyhow::Result<T>,
     {
         Self {
-            value: Rc::new(UnsafeCell::new(MemoizedObjectData::ComputeValue(Box::new(compute_value)))),
+            value: Rc::new(UnsafeCell::new(MemoizedObjectData::ComputeValue(Box::new(
+                compute_value,
+            )))),
         }
     }
 
@@ -39,16 +41,15 @@ impl<T> MemoizedObject<T> {
     where
         F: 'static + Fn() -> anyhow::Result<T>,
     {
-        *unsafe { &mut *self.value.get() } = MemoizedObjectData::ComputeValue(Box::new(compute_value));
+        *unsafe { &mut *self.value.get() } =
+            MemoizedObjectData::ComputeValue(Box::new(compute_value));
     }
 
     pub fn get_value(&self) -> anyhow::Result<T>
     where
         T: Clone,
     {
-        let mut_value = unsafe {
-            &mut *self.value.get()
-        };
+        let mut_value = unsafe { &mut *self.value.get() };
         return match mut_value {
             MemoizedObjectData::Value(v) => {
                 if let Some(value) = v {
@@ -62,7 +63,7 @@ impl<T> MemoizedObject<T> {
                 *mut_value = MemoizedObjectData::Value(Some(value.clone()));
                 Ok(value)
             }
-        }
+        };
     }
 }
 

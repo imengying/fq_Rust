@@ -24,7 +24,12 @@ extern "C" {
     pub fn uc_strerror(error_code: uc_error) -> *const c_char;
     pub fn uc_reg_write(engine: uc_handle, regid: c_int, value: *const c_void) -> uc_error;
     pub fn uc_reg_read(engine: uc_handle, regid: c_int, value: *mut c_void) -> uc_error;
-    pub fn uc_reg_read_batch(engine: uc_handle, regid: *const c_int, value: *const *mut c_void, count: c_int) -> uc_error;
+    pub fn uc_reg_read_batch(
+        engine: uc_handle,
+        regid: *const c_int,
+        value: *const *mut c_void,
+        count: c_int,
+    ) -> uc_error;
     pub fn uc_mem_write(
         engine: uc_handle,
         address: u64,

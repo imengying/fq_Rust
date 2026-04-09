@@ -1,3 +1,33 @@
+use crate::backend::RegisterARM64;
+use crate::backend::RegisterARM64::*;
+use crate::backend::{Backend, Permission};
+use crate::emulator::signal::{SignalOps, UnixSigSet};
+use crate::emulator::thread::{
+    AbstractTask, MarshmallowThread, RunnableTask, Task, TaskStatus, ThreadDispatcher, Waiter,
+    WaiterTrait,
+};
+use crate::emulator::{AndroidEmulator, AndroidEmulatorInner, HEAP_BASE};
+use crate::linux::errno::Errno;
+use crate::linux::file_system::{FileIO, FileIOTrait, SeekResult, StMode};
+use crate::linux::fs::cpuinfo::Cpuinfo;
+use crate::linux::fs::direction::Direction;
+use crate::linux::fs::linux_file::LinuxFileIO;
+use crate::linux::fs::maps::Maps;
+use crate::linux::fs::meminfo::Meminfo;
+use crate::linux::fs::random_boot_id::RandomBootId;
+use crate::linux::fs::urandom::URandom;
+use crate::linux::fs::ByteArrayFileIO;
+use crate::linux::pipe::Pipe;
+use crate::linux::sock::local_socket::LocalSocket;
+use crate::linux::structs::prctl::PrctlOp;
+use crate::linux::structs::socket::{Pf, SockType};
+use crate::linux::structs::{prctl, CloneFlag, OFlag, Timespec, Timeval, Timezone};
+use crate::linux::thread::{FutexIndefinitelyWaiter, FutexNanoSleepWaiter};
+use crate::linux::PAGE_ALIGN;
+use crate::pointer::VMPointer;
+use bitflags::Flags;
+use bytes::BytesMut;
+use log::{error, info, warn};
 use std::ascii::AsciiExt;
 use std::cell::OnceCell;
 use std::ffi::c_long;
@@ -8,56 +38,31 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use bitflags::Flags;
-use bytes::BytesMut;
-use log::{error, info, warn};
-use crate::backend::{Backend, Permission};
-use crate::backend::RegisterARM64;
-use crate::backend::RegisterARM64::{*};
-use crate::emulator::{AndroidEmulator, AndroidEmulatorInner, HEAP_BASE};
-use crate::emulator::signal::{SignalOps, UnixSigSet};
-use crate::emulator::thread::{AbstractTask, MarshmallowThread, RunnableTask, Task, TaskStatus, ThreadDispatcher, Waiter, WaiterTrait};
-use crate::linux::errno::Errno;
-use crate::linux::file_system::{FileIO, FileIOTrait, SeekResult, StMode};
-use crate::linux::fs::ByteArrayFileIO;
-use crate::linux::fs::cpuinfo::Cpuinfo;
-use crate::linux::fs::direction::Direction;
-use crate::linux::fs::linux_file::LinuxFileIO;
-use crate::linux::fs::maps::Maps;
-use crate::linux::fs::meminfo::Meminfo;
-use crate::linux::fs::random_boot_id::RandomBootId;
-use crate::linux::fs::urandom::URandom;
-use crate::linux::PAGE_ALIGN;
-use crate::linux::pipe::Pipe;
-use crate::linux::sock::local_socket::LocalSocket;
-use crate::linux::structs::{OFlag, prctl, Timespec, Timeval, Timezone, CloneFlag};
-use crate::linux::structs::prctl::PrctlOp;
-use crate::linux::structs::socket::{Pf, SockType};
-use crate::linux::thread::{FutexIndefinitelyWaiter, FutexNanoSleepWaiter};
-use crate::pointer::VMPointer;
 
 macro_rules! throw_err {
     ($backend:ident, $emulator:ident, $errno:expr) => {
         let errno = <Errno as Into<i32>>::into($errno);
-        $backend.reg_write_i64(RegisterARM64::X0, -(errno as i64)).unwrap();
+        $backend
+            .reg_write_i64(RegisterARM64::X0, -(errno as i64))
+            .unwrap();
         $emulator.set_errno(errno).expect("failed to set errno");
         return;
     };
 }
 macro_rules! ret_u64 {
-    ($backend:ident, $X0:expr) => {
-        {
-            $backend.reg_write(RegisterARM64::X0, $X0).expect("failed to write x0");
-        }
-    };
+    ($backend:ident, $X0:expr) => {{
+        $backend
+            .reg_write(RegisterARM64::X0, $X0)
+            .expect("failed to write x0");
+    }};
 }
 
 macro_rules! ret_i32 {
-    ($backend:ident, $X0:expr) => {
-        {
-            $backend.reg_write_i64(RegisterARM64::X0, ($X0 as i64)).expect("failed to write x0");
-        }
-    };
+    ($backend:ident, $X0:expr) => {{
+        $backend
+            .reg_write_i64(RegisterARM64::X0, ($X0 as i64))
+            .expect("failed to write x0");
+    }};
 }
 
 macro_rules! ldr_i32 {
@@ -102,9 +107,17 @@ pub fn syscall_brk<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>
 
     let brk = emulator.inner_mut().brk;
     if addr > brk {
-        backend.mem_map(brk, (addr - brk) as usize, (Permission::READ | Permission::WRITE).bits()).expect("failed to map memory: brk");
+        backend
+            .mem_map(
+                brk,
+                (addr - brk) as usize,
+                (Permission::READ | Permission::WRITE).bits(),
+            )
+            .expect("failed to map memory: brk");
     } else if addr < brk {
-        backend.mem_unmap(addr, (brk - addr) as usize).expect("failed to unmap memory: brk");
+        backend
+            .mem_unmap(addr, (brk - addr) as usize)
+            .expect("failed to unmap memory: brk");
     }
     emulator.inner_mut().brk = addr;
 
@@ -123,11 +136,19 @@ pub fn syscall_prctl<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             if from == "libc.so" {
                 ret_i32!(backend, 0);
             } else {
-                panic!("prctl not supported: {:?} from {}", PrctlOp::BIONIC_PR_SET_VMA, from);
+                panic!(
+                    "prctl not supported: {:?} from {}",
+                    PrctlOp::BIONIC_PR_SET_VMA,
+                    from
+                );
             }
         }
-        PrctlOp::UNKNOWN => { panic!("prctl not supported: 0x{:X}", op) }
-        _ => { panic!("prctl not supported: {:?}", PrctlOp::from_bits(op)) }
+        PrctlOp::UNKNOWN => {
+            panic!("prctl not supported: 0x{:X}", op)
+        }
+        _ => {
+            panic!("prctl not supported: {:?}", PrctlOp::from_bits(op))
+        }
     };
 }
 
@@ -138,9 +159,7 @@ pub fn syscall_gettimeofday<T: Clone>(backend: &Backend<T>, emulator: &AndroidEm
     let tv_pointer = emulator.backend.reg_read(X0).unwrap();
     if tv_pointer != 0 {
         let mut buffer = [0u8; TV_SIZE];
-        let tv = unsafe {
-            &mut *(buffer.as_mut_ptr() as *mut Timeval)
-        };
+        let tv = unsafe { &mut *(buffer.as_mut_ptr() as *mut Timeval) };
         let now = chrono::Local::now();
         tv.tv_sec = now.timestamp();
         tv.tv_usec = now.timestamp_subsec_nanos() as i64;
@@ -150,16 +169,17 @@ pub fn syscall_gettimeofday<T: Clone>(backend: &Backend<T>, emulator: &AndroidEm
     let tz_pointer = emulator.backend.reg_read(X1).unwrap();
     if tz_pointer != 0 {
         let mut buffer = [0u8; TZ_SIZE];
-        let tz = unsafe {
-            &mut *(buffer.as_mut_ptr() as *mut Timezone)
-        };
+        let tz = unsafe { &mut *(buffer.as_mut_ptr() as *mut Timezone) };
         tz.tz_dsttime = 0;
         tz.tz_minuteswest = -480;
         backend.mem_write(tz_pointer, &buffer).unwrap();
     }
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall gettimeofday(tv_pointer=0x{:x}, tz_pointer=0x{:x})", tv_pointer, tz_pointer);
+        println!(
+            "syscall gettimeofday(tv_pointer=0x{:x}, tz_pointer=0x{:x})",
+            tv_pointer, tz_pointer
+        );
     }
 
     ret_i32!(backend, 0);
@@ -210,28 +230,34 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             Timespec::default()
         } else {
             let mut buffer = [0u8; size_of::<Timespec>()];
-            backend.mem_read(timeout, &mut buffer)
+            backend
+                .mem_read(timeout, &mut buffer)
                 .expect("Failed to read from memory: time_spec");
-            let time_spec: &Timespec = unsafe {
-                &*(buffer.as_ptr() as *const Timespec)
-            };
+            let time_spec: &Timespec = unsafe { &*(buffer.as_ptr() as *const Timespec) };
             time_spec.clone()
         };
 
-        let running_task = emulator.inner_mut().thread_dispatcher
-            .running_task_mut();
+        let running_task = emulator.inner_mut().thread_dispatcher.running_task_mut();
         if let Some(running_task_cell) = running_task {
             let waiter = if timeout == 0 {
                 Waiter::FutexIndefinite(FutexIndefinitelyWaiter::new(uaddr, val, &emulator.backend))
             } else {
-                Waiter::FutexNanoSleep(FutexNanoSleepWaiter::new(uaddr, val, (time_spec.tv_sec * 1000i64 + time_spec.tv_nsec / 1000000i64) as u64, emulator.backend.clone()))
+                Waiter::FutexNanoSleep(FutexNanoSleepWaiter::new(
+                    uaddr,
+                    val,
+                    (time_spec.tv_sec * 1000i64 + time_spec.tv_nsec / 1000000i64) as u64,
+                    emulator.backend.clone(),
+                ))
             };
             if option_env!("EMU_LOG") == Some("1") {
-                info!("futex: set waiter: {:?}", match &waiter {
-                    Waiter::FutexIndefinite(waiter) => waiter.can_dispatch().to_string() + "/",
-                    Waiter::FutexNanoSleep(waiter) => waiter.can_dispatch().to_string() + "|",
-                    Waiter::Unknown(_) => unreachable!()
-                });
+                info!(
+                    "futex: set waiter: {:?}",
+                    match &waiter {
+                        Waiter::FutexIndefinite(waiter) => waiter.can_dispatch().to_string() + "/",
+                        Waiter::FutexNanoSleep(waiter) => waiter.can_dispatch().to_string() + "|",
+                        Waiter::Unknown(_) => unreachable!(),
+                    }
+                );
             }
             match unsafe { &mut *running_task_cell.get() } {
                 AbstractTask::Function64(task) => {
@@ -252,16 +278,16 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
         }
 
         if emulator.inner_mut().thread_dispatcher.task_counts() > 1 {
-            emulator.emu_stop(TaskStatus::X).
-                expect("failed to stop emulator");
+            emulator
+                .emu_stop(TaskStatus::X)
+                .expect("failed to stop emulator");
             ret_i32!(backend, Errno::ETIMEDOUT.as_i32());
             return;
         } else {
             ret_i32!(backend, 0);
             return;
         }
-    }
-    else if 1 == cmd {
+    } else if 1 == cmd {
         let task_count = emulator.inner_mut().thread_dispatcher.task_counts();
         if task_count <= 1 {
             ret_i32!(backend, 0);
@@ -278,13 +304,15 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
                         info!("futex unexpected task type: function64");
                     }
                     let waiter = task.get_waiter();
-                    if waiter.is_none() { continue }
+                    if waiter.is_none() {
+                        continue;
+                    }
                     //println!("futex unexpected task type: function64");
                     let waiter = waiter.unwrap();
                     match waiter {
                         Waiter::FutexIndefinite(waiter) => waiter.wake_up(uaddr),
                         Waiter::FutexNanoSleep(waiter) => waiter.wake_up(uaddr),
-                        _ => continue
+                        _ => continue,
                     };
                     count += 1;
                     if count >= val {
@@ -296,12 +324,14 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
                         info!("futex unexpected task type: signal_task");
                     }
                     let waiter = task.get_waiter();
-                    if waiter.is_none() { continue }
+                    if waiter.is_none() {
+                        continue;
+                    }
                     let waiter = waiter.unwrap();
                     match waiter {
                         Waiter::FutexIndefinite(waiter) => waiter.wake_up(uaddr),
                         Waiter::FutexNanoSleep(waiter) => waiter.wake_up(uaddr),
-                        _ => continue
+                        _ => continue,
                     };
                     count += 1;
                     if count >= val {
@@ -314,19 +344,23 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
                     }
                     //println!("futex unexpected task type: marshmallow_thread");
                     let waiter = task.get_waiter();
-                    if waiter.is_none() { continue }
+                    if waiter.is_none() {
+                        continue;
+                    }
                     let waiter = waiter.unwrap();
                     match waiter {
                         Waiter::FutexIndefinite(waiter) => waiter.wake_up(uaddr),
                         Waiter::FutexNanoSleep(waiter) => waiter.wake_up(uaddr),
-                        _ => continue
+                        _ => continue,
                     };
                     count += 1;
                     if count >= val {
                         break;
                     }
                 }
-                AbstractTask::KitKatThread(_) => panic!("futex unexpected task type: kitkat_thread"),
+                AbstractTask::KitKatThread(_) => {
+                    panic!("futex unexpected task type: kitkat_thread")
+                }
             }
         }
         if count > 0 {
@@ -346,8 +380,7 @@ pub fn syscall_futex<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
 
         ret_i32!(backend, 0);
         return;
-    }
-    else if 4 == cmd {
+    } else if 4 == cmd {
         ret_i32!(backend, 0);
         return;
     }
@@ -360,43 +393,55 @@ pub fn syscall_clock_gettime<T: Clone>(backend: &Backend<T>, emulator: &AndroidE
     let tp_pointer = ldr_u64!(backend, X1);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall clock_gettime(clk_id={}, tp_pointer=0x{:x})", clk_id, tp_pointer);
+        println!(
+            "syscall clock_gettime(clk_id={}, tp_pointer=0x{:x})",
+            clk_id, tp_pointer
+        );
     }
 
     match clk_id {
-        0 => { // CLOCK_REALTIME
+        0 => {
+            // CLOCK_REALTIME
             if let Ok(duration_since_epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
                 let mut buffer = [0u8; size_of::<Timeval>()];
                 let tv = unsafe { &mut *(buffer.as_mut_ptr() as *mut Timeval) };
                 tv.tv_sec = (duration_since_epoch.as_secs() + 8 * 3600) as i64;
                 tv.tv_usec = duration_since_epoch.subsec_micros() as i64;
-                backend.mem_write(tp_pointer, &buffer).expect("failed to write timeval");
+                backend
+                    .mem_write(tp_pointer, &buffer)
+                    .expect("failed to write timeval");
                 ret_i32!(backend, 0);
             } else {
                 panic!("SystemTime before UNIX EPOCH!");
             }
         }
-        1 => { // CLOCK_MONOTONIC
+        1 => {
+            // CLOCK_MONOTONIC
             let start = START.get_or_init(|| Instant::now()).clone();
             let mut buffer = [0u8; size_of::<Timespec>()];
             let duration = Instant::now().duration_since(start);
             let tv = unsafe { &mut *(buffer.as_mut_ptr() as *mut Timespec) };
             tv.tv_sec = duration.as_secs() as i64;
             tv.tv_nsec = duration.subsec_nanos() as i64;
-            backend.mem_write(tp_pointer, &buffer).expect("failed to write timespec");
+            backend
+                .mem_write(tp_pointer, &buffer)
+                .expect("failed to write timespec");
             ret_i32!(backend, 0);
         }
-        3 => { // CLOCK_THREAD_CPUTIME_ID
+        3 => {
+            // CLOCK_THREAD_CPUTIME_ID
             let start = START.get_or_init(|| Instant::now()).clone();
             let mut buffer = [0u8; size_of::<Timespec>()];
             let duration = Instant::now().duration_since(start);
             let tv = unsafe { &mut *(buffer.as_mut_ptr() as *mut Timespec) };
             tv.tv_sec = 0;
             tv.tv_nsec = duration.subsec_nanos() as i64;
-            backend.mem_write(tp_pointer, &buffer).expect("failed to write timespec");
+            backend
+                .mem_write(tp_pointer, &buffer)
+                .expect("failed to write timespec");
             ret_i32!(backend, 0);
         }
-        _ => panic!("clock_gettime not supported: {}", clk_id)
+        _ => panic!("clock_gettime not supported: {}", clk_id),
     }
 }
 
@@ -432,12 +477,18 @@ pub fn syscall_openat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator
 
     let from_module = emulator.find_caller_name();
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        info!("syscall try openat(path={}, flags={:?}, mode={}) from {}", path, flags, mode, from_module);
+        info!(
+            "syscall try openat(path={}, flags={:?}, mode={}) from {}",
+            path, flags, mode, from_module
+        );
     }
     let (fd, errno) = open(emulator, &path, flags, mode, &from_module);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        info!("syscall openat(path={}, flags={:?}, mode={}) -> {} from {}", path, flags, mode, fd, from_module);
+        info!(
+            "syscall openat(path={}, flags={:?}, mode={}) -> {} from {}",
+            path, flags, mode, fd, from_module
+        );
     }
 
     ret_i32!(backend, fd);
@@ -474,7 +525,10 @@ pub fn syscall_mprotect<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulat
     let prot = ldr_u32!(backend, X2);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall mprotect(addr=0x{:x}, len={}, prot={:?})", addr, len, prot);
+        println!(
+            "syscall mprotect(addr=0x{:x}, len={}, prot={:?})",
+            addr, len, prot
+        );
     }
 
     let aligned_address = (addr / PAGE_ALIGN as u64) * PAGE_ALIGN as u64;
@@ -482,7 +536,7 @@ pub fn syscall_mprotect<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulat
     let size = len + offset as usize;
     let aligned_length = ((size - 1) / PAGE_ALIGN + 1) * PAGE_ALIGN;
 
-/*    let mut mem_map_item = None;
+    /*    let mut mem_map_item = None;
     for (begin, map) in emulator.inner_mut().memory.memory_map.iter() {
         if *begin <= aligned_address && aligned_address < (map.base + map.size as u64) {
             mem_map_item = Some(map.clone());
@@ -520,7 +574,10 @@ pub fn syscall_madvise<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     let advice = ldr_i32!(backend, X2);
     if advice == 4 {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => success", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => success",
+                addr, len, advice
+            );
         }
 
         ret_i32!(backend, 0);
@@ -528,32 +585,47 @@ pub fn syscall_madvise<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
 
     if addr <= 0 {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => addr is nullptr", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => addr is nullptr",
+                addr, len, advice
+            );
         }
         throw_err!(backend, emulator, Errno::EINVAL);
     }
 
     if addr % PAGE_ALIGN as u64 != 0 {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => addr not aligned", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => addr not aligned",
+                addr, len, advice
+            );
         }
         throw_err!(backend, emulator, Errno::EINVAL);
     }
     if len % PAGE_ALIGN != 0 {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => len is not aligned", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => len is not aligned",
+                addr, len, advice
+            );
         }
         throw_err!(backend, emulator, Errno::EINVAL);
     }
 
     if let Some(_) = emulator.inner_mut().memory.memory_map.get(&addr) {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => success", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => success",
+                addr, len, advice
+            );
         }
         ret_i32!(backend, 0);
     } else {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall madvice(addr=0x{:x}, len={}, advice={}) => locked memory", addr, len, advice);
+            println!(
+                "syscall madvice(addr=0x{:x}, len={}, advice={}) => locked memory",
+                addr, len, advice
+            );
         }
         throw_err!(backend, emulator, Errno::EINVAL);
     }
@@ -565,7 +637,10 @@ pub fn syscall_fstat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
     let file_system = &mut emulator.inner_mut().file_system;
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall fstat(fd={}, stat_pointer=0x{:x})", fd, stat_pointer);
+        println!(
+            "syscall fstat(fd={}, stat_pointer=0x{:x})",
+            fd, stat_pointer
+        );
     }
 
     if let Some(file) = file_system.get_file_mut(fd) {
@@ -582,8 +657,8 @@ pub fn syscall_fstat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             FileIO::Error(_) => panic!("fstat error, fd: {}, reason: file not found", fd),
             FileIO::Direction(dir) => {
                 dir.fstat(VMPointer::new(stat_pointer, 0, backend.clone()));
-            },
-            FileIO::LocalSocket(_) => unreachable!()
+            }
+            FileIO::LocalSocket(_) => unreachable!(),
         }
     } else {
         throw_err!(backend, emulator, Errno::EBADF);
@@ -615,7 +690,7 @@ pub fn syscall_close<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
 
     let file_system = &mut emulator.inner_mut().file_system;
     if let Some(file) = file_system.remove_file(fd) {
-/*        let running_task = emulator.inner_mut().thread_dispatcher
+        /*        let running_task = emulator.inner_mut().thread_dispatcher
             .running_task_mut();
         let is_main_task = if let Some(running_task_cell) = running_task {
             match unsafe { &mut *running_task_cell.get() } {
@@ -662,18 +737,16 @@ pub fn syscall_read<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T
             FileIO::Error(_) => {
                 throw_err!(backend, emulator, Errno::EBADF);
             }
-            FileIO::Dynamic(file) => {
-                file.st_mode()
-            }
-            FileIO::Direction(dir) => {
-                <Direction as FileIOTrait<T>>::st_mode(dir)
-            }
-            FileIO::LocalSocket(_) => {
-                StMode::S_IRUSR | StMode::S_IWUSR
-            }
+            FileIO::Dynamic(file) => file.st_mode(),
+            FileIO::Direction(dir) => <Direction as FileIOTrait<T>>::st_mode(dir),
+            FileIO::LocalSocket(_) => StMode::S_IRUSR | StMode::S_IWUSR,
         };
 
-        if !(mode.contains(StMode::S_IRUSR) || mode.contains(StMode::S_IROTH) || mode.contains(StMode::S_IRGRP)) && from_module != "libc.so" {
+        if !(mode.contains(StMode::S_IRUSR)
+            || mode.contains(StMode::S_IROTH)
+            || mode.contains(StMode::S_IRGRP))
+            && from_module != "libc.so"
+        {
             throw_err!(backend, emulator, Errno::EACCES);
         }
 
@@ -683,17 +756,25 @@ pub fn syscall_read<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T
             FileIO::Error(_) => unreachable!(),
             FileIO::Dynamic(file) => file.read(VMPointer::new(buf, 0, backend.clone()), count),
             FileIO::Direction(_) => unreachable!(),
-            FileIO::LocalSocket(socket) => socket.read(VMPointer::new(buf, 0, backend.clone()), count),
+            FileIO::LocalSocket(socket) => {
+                socket.read(VMPointer::new(buf, 0, backend.clone()), count)
+            }
         };
 
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall read(fd={}, buf=0x{:x}, count={}) => {} from {}", fd, buf, count, read, from_module);
+            println!(
+                "syscall read(fd={}, buf=0x{:x}, count={}) => {} from {}",
+                fd, buf, count, read, from_module
+            );
         }
 
         ret_u64!(backend, read as u64);
     } else {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall read(fd={}, buf=0x{:x}, count={}) => EBADF from {}", fd, buf, count, from_module);
+            println!(
+                "syscall read(fd={}, buf=0x{:x}, count={}) => EBADF from {}",
+                fd, buf, count, from_module
+            );
         }
 
         throw_err!(backend, emulator, Errno::EBADF);
@@ -719,7 +800,10 @@ pub fn syscall_renameat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulat
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         if old_path.is_ascii() && new_path.is_ascii() {
-            println!("syscall renameat(old_dir_fd={}, old_path={}, new_dir_fd={}, new_path={})", old_dir_fd, old_path, new_dir_fd, new_path);
+            println!(
+                "syscall renameat(old_dir_fd={}, old_path={}, new_dir_fd={}, new_path={})",
+                old_dir_fd, old_path, new_dir_fd, new_path
+            );
         } else {
             println!("syscall renameat(old_dir_fd={}, old_path=hex::decode({}), new_dir={}, new_path=hex::deecode({}))", old_dir_fd, hex::encode(old_path.as_bytes()), new_dir_fd, hex::encode(new_path.as_bytes()));
         }
@@ -740,9 +824,18 @@ pub fn syscall_fstatat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         if path.is_ascii() {
-            println!("syscall fstatat(fd={}, path={}, stat_pointer=0x{:x}, flag={})", fd, path, stat_pointer, flag);
+            println!(
+                "syscall fstatat(fd={}, path={}, stat_pointer=0x{:x}, flag={})",
+                fd, path, stat_pointer, flag
+            );
         } else {
-            println!("syscall fstatat(fd={}, path=hex::decode({}), stat_pointer=0x{:x}, flag={})", fd, hex::encode(path.as_bytes()), stat_pointer, flag);
+            println!(
+                "syscall fstatat(fd={}, path=hex::decode({}), stat_pointer=0x{:x}, flag={})",
+                fd,
+                hex::encode(path.as_bytes()),
+                stat_pointer,
+                flag
+            );
         }
     }
 
@@ -756,20 +849,27 @@ pub fn syscall_fstatat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
 
     let file_system = &mut emulator.inner_mut().file_system;
     if let Some(ref resolver) = file_system.file_resolver {
-        if let Some(file) = resolver(file_system, path.as_str(), OFlag::from_bits_truncate(flag), 0) {
+        if let Some(file) = resolver(
+            file_system,
+            path.as_str(),
+            OFlag::from_bits_truncate(flag),
+            0,
+        ) {
             match file {
                 FileIO::Bytes(file) => file.fstat(VMPointer::new(stat_pointer, 0, backend.clone())),
                 FileIO::Error(errno) => {
                     ret_i32!(backend, fd);
                     emulator.set_errno(errno).expect("failed to set errno");
                     return;
-                },
+                }
                 FileIO::File(file) => file.fstat(VMPointer::new(stat_pointer, 0, backend.clone())),
-                FileIO::Dynamic(file) => file.fstat(VMPointer::new(stat_pointer, 0, backend.clone())),
+                FileIO::Dynamic(file) => {
+                    file.fstat(VMPointer::new(stat_pointer, 0, backend.clone()))
+                }
                 FileIO::Direction(dir) => {
                     dir.fstat(VMPointer::new(stat_pointer, 0, backend.clone()));
                 }
-                FileIO::LocalSocket(_) => unreachable!()
+                FileIO::LocalSocket(_) => unreachable!(),
             }
         } else {
             throw_err!(backend, emulator, Errno::ENOENT);
@@ -825,7 +925,10 @@ pub fn syscall_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidE
 
     let fnc = emulator.backend.reg_read(X5).unwrap() as i64;
     let arg = emulator.backend.reg_read(X6).unwrap() as i64;
-    if child_stack != 0 && backend.mem_read_i64(child_stack).unwrap() == fnc && backend.mem_read_i64(child_stack + 8).unwrap() == arg {
+    if child_stack != 0
+        && backend.mem_read_i64(child_stack).unwrap() == fnc
+        && backend.mem_read_i64(child_stack + 8).unwrap() == arg
+    {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
             println!("syscall clone(child_stack=0x{:x}, parent_tid=0x{:x}, fn=0x{:x}, arg=0x{:x}) => bionic_clone", child_stack, parent_tid, fnc, arg);
         }
@@ -856,7 +959,6 @@ pub fn syscall_lseek<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
     let offset = ldr_u64!(backend, X1) as i64;
     let whence = ldr_i32!(backend, X2);
 
-
     let file_system = &mut emulator.inner_mut().file_system;
     if let Some(file) = file_system.get_file_mut(fd) {
         let result = match file {
@@ -868,7 +970,10 @@ pub fn syscall_lseek<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             FileIO::LocalSocket(_) => panic!("lseek not supported: local socket"),
         };
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall lseek(fd={}, offset={}, whence={}) => {:?}", fd, offset, whence, result);
+            println!(
+                "syscall lseek(fd={}, offset={}, whence={}) => {:?}",
+                fd, offset, whence, result
+            );
         }
         match result {
             SeekResult::Ok(offset) => {
@@ -886,7 +991,10 @@ pub fn syscall_lseek<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
         }
     } else {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall lseek(fd={}, offset={}, whence={}) => EBADF", fd, offset, whence);
+            println!(
+                "syscall lseek(fd={}, offset={}, whence={}) => EBADF",
+                fd, offset, whence
+            );
         }
         throw_err!(backend, emulator, Errno::EBADF);
     }
@@ -898,7 +1006,10 @@ pub fn syscall_mkdirat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     let mode = ldr_u32!(backend, X2);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall mkdirat(dir_fd={}, path={}, mode={:X})", dir_fd, path, mode);
+        println!(
+            "syscall mkdirat(dir_fd={}, path={}, mode={:X})",
+            dir_fd, path, mode
+        );
     }
 
     if path.is_empty() || path.as_bytes()[0] != b'/' {
@@ -916,13 +1027,19 @@ pub fn syscall_mkdirat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     unreachable!()
 }
 
-pub fn syscall_set_tid_address<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidEmulator<'a, T>) {
+pub fn syscall_set_tid_address<'a, T: Clone>(
+    backend: &Backend<'a, T>,
+    emulator: &AndroidEmulator<'a, T>,
+) {
     let tidptr = ldr_u64!(backend, X0);
     let tid = emulator.get_current_pid() as i32;
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         let from = emulator.find_caller_name();
-        println!("syscall set_tid_address(tidptr=0x{:x}) from {}", tidptr, from);
+        println!(
+            "syscall set_tid_address(tidptr=0x{:x}) from {}",
+            tidptr, from
+        );
     }
 
     let task = emulator.inner_mut().context_task.as_ref().unwrap();
@@ -947,7 +1064,10 @@ pub fn syscall_rt_sigprocmask<T: Clone>(backend: &Backend<T>, emulator: &Android
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         let from = emulator.find_caller_name();
-        println!("syscall rt_sigprocmask(how={}, set=0x{:x}, oldset=0x{:x}) from {}", how, set, oldset, from);
+        println!(
+            "syscall rt_sigprocmask(how={}, set=0x{:x}, oldset=0x{:x}) from {}",
+            how, set, oldset, from
+        );
     }
 
     let task = emulator.inner_mut().context_task.as_ref().unwrap();
@@ -996,7 +1116,7 @@ pub fn syscall_rt_sigprocmask<T: Clone>(backend: &Backend<T>, emulator: &Android
                     ret_i32!(backend, 0);
                     return;
                 }
-                _ => panic!("rt_sigprocmask not supported: {}", how)
+                _ => panic!("rt_sigprocmask not supported: {}", how),
             }
         }
         _ => {
@@ -1022,7 +1142,7 @@ pub fn syscall_exit<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T
             }
             task.set_exit_status(status)
         }
-        _ => panic!("set_tid_address not supported: task type")
+        _ => panic!("set_tid_address not supported: task type"),
     }
 
     emulator.emu_stop(TaskStatus::X).unwrap();
@@ -1038,7 +1158,10 @@ pub fn syscall_exit_group<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmul
     ret_i32!(backend, 0);
 }
 
-pub fn syscall_bionic_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidEmulator<'a, T>) {
+pub fn syscall_bionic_clone<'a, T: Clone>(
+    backend: &Backend<'a, T>,
+    emulator: &AndroidEmulator<'a, T>,
+) {
     let flag = ldr_u32!(backend, X0);
     let child_stack = ldr_u64!(backend, X1);
     let parent_tid = ldr_u64!(backend, X2);
@@ -1082,14 +1205,37 @@ pub fn syscall_bionic_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &A
         }
     }
 
-    let thread_id = emulator.inner_mut().task_id_factory
+    let thread_id = emulator
+        .inner_mut()
+        .task_id_factory
         .fetch_add(1, Ordering::SeqCst);
 
     if flag.contains(CloneFlag::CLONE_PARENT_SETTID) {
         if parent_tid == 0 {
             throw_err!(backend, emulator, Errno::EINVAL);
         }
-        backend.mem_write(parent_tid, &thread_id.to_le_bytes()).unwrap();
+        backend
+            .mem_write(parent_tid, &thread_id.to_le_bytes())
+            .unwrap();
+    }
+
+    if std::env::var("FQ_REAL_BIONIC_CLONE").ok().as_deref() != Some("1") {
+        info!(
+            "fake bionic_clone: caller={}, fn=0x{:X}, arg=0x{:X}, child_tid=0x{:X}, tls=0x{:X}, tid={}",
+            emulator.find_caller_name(),
+            fn_ptr,
+            arg,
+            child_tid,
+            tls,
+            thread_id
+        );
+        if child_tid != 0 {
+            backend
+                .mem_write(child_tid, &thread_id.to_le_bytes())
+                .unwrap();
+        }
+        ret_i32!(backend, thread_id as i32);
+        return;
     }
 
     //println!("bbbbbbbbbbbb");
@@ -1105,7 +1251,9 @@ pub fn syscall_bionic_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &A
     //println!("cccccc");
 
     if child_tid != 0 {
-        backend.mem_write(child_tid, &thread_id.to_le_bytes()).unwrap();
+        backend
+            .mem_write(child_tid, &thread_id.to_le_bytes())
+            .unwrap();
     }
     ret_i32!(backend, thread_id as i32);
 }
@@ -1123,7 +1271,10 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
     let from_module = emulator.find_caller_name();
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall faccessat(dir_fd={}, path={}, mode={}, flag={})", dir_fd, path, mode, flag);
+        println!(
+            "syscall faccessat(dir_fd={}, path={}, mode={}, flag={})",
+            dir_fd, path, mode, flag
+        );
     }
 
     if !path.is_ascii() {
@@ -1166,7 +1317,8 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
             || path == "/system/xbin/su"
             || path == "/cache/su"
             || path == "/data/su"
-            || path == "/dev/su" {
+            || path == "/dev/su"
+        {
             throw_err!(backend, emulator, Errno::EINVAL);
         }
 
@@ -1176,13 +1328,7 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
         }
     }
 
-    let (fd, errno) = open(
-        emulator,
-        &path,
-        OFlag::empty(),
-        mode,
-        &from_module,
-    );
+    let (fd, errno) = open(emulator, &path, OFlag::empty(), mode, &from_module);
 
     if fd >= 0 {
         let file_system = &mut emulator.inner_mut().file_system;
@@ -1209,7 +1355,9 @@ pub fn syscall_faccessat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
             dir_fd, path, mode, flag, errno, from_module
         );
     }
-    backend.reg_write_i64(RegisterARM64::X0, -(errno as i64)).unwrap();
+    backend
+        .reg_write_i64(RegisterARM64::X0, -(errno as i64))
+        .unwrap();
     emulator.set_errno(errno).expect("failed to set errno");
 }
 
@@ -1219,7 +1367,10 @@ pub fn syscall_getdents64<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmul
     let size = ldr_i32!(backend, X2) as usize;
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall getdents64(fd={}, dirp=0x{:x}, size={})", fd, dirp, size);
+        println!(
+            "syscall getdents64(fd={}, dirp=0x{:x}, size={})",
+            fd, dirp, size
+        );
     }
 
     let file_system = &mut emulator.inner_mut().file_system;
@@ -1229,8 +1380,10 @@ pub fn syscall_getdents64<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmul
             FileIO::File(_) => unreachable!(),
             FileIO::Error(_) => unreachable!(),
             FileIO::Dynamic(_) => unreachable!(),
-            FileIO::Direction(dir) => dir.getdents64(VMPointer::new(dirp, 0, backend.clone()), size),
-            FileIO::LocalSocket(_) => unreachable!()
+            FileIO::Direction(dir) => {
+                dir.getdents64(VMPointer::new(dirp, 0, backend.clone()), size)
+            }
+            FileIO::LocalSocket(_) => unreachable!(),
         };
 
         ret_u64!(backend, ret as u64);
@@ -1255,14 +1408,19 @@ pub fn syscall_write<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             }
             FileIO::Dynamic(file) => file.st_mode(),
             FileIO::Direction(_) => unreachable!(),
-            FileIO::LocalSocket(_) => {
-                StMode::S_IRUSR | StMode::S_IWUSR
-            }
+            FileIO::LocalSocket(_) => StMode::S_IRUSR | StMode::S_IWUSR,
         };
 
-        if !(mode.contains(StMode::S_IWUSR) || mode.contains(StMode::S_IWOTH) || mode.contains(StMode::S_IWGRP)) && from_module != "libc.so" {
+        if !(mode.contains(StMode::S_IWUSR)
+            || mode.contains(StMode::S_IWOTH)
+            || mode.contains(StMode::S_IWGRP))
+            && from_module != "libc.so"
+        {
             if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-                println!("syscall write(fd={}, buf=0x{:x}, count={}) => EACCES from {}", fd, buf, count, from_module);
+                println!(
+                    "syscall write(fd={}, buf=0x{:x}, count={}) => EACCES from {}",
+                    fd, buf, count, from_module
+                );
             }
             throw_err!(backend, emulator, Errno::EACCES);
         }
@@ -1277,7 +1435,7 @@ pub fn syscall_write<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
             FileIO::Direction(_) => unreachable!(),
             FileIO::LocalSocket(socket) => {
                 <LocalSocket as FileIOTrait<T>>::write(socket, data.as_slice())
-            },
+            }
         };
 
         if written == -1 {
@@ -1285,13 +1443,19 @@ pub fn syscall_write<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
         }
 
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall write(fd={}, buf=0x{:x}, count={}) => {} from {}", fd, buf, count, written, from_module);
+            println!(
+                "syscall write(fd={}, buf=0x{:x}, count={}) => {} from {}",
+                fd, buf, count, written, from_module
+            );
         }
 
         ret_u64!(backend, written as u64);
     } else {
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            println!("syscall write(fd={}, buf=0x{:x}, count={}) => EBADF from {}", fd, buf, count, from_module);
+            println!(
+                "syscall write(fd={}, buf=0x{:x}, count={}) => EBADF from {}",
+                fd, buf, count, from_module
+            );
         }
 
         throw_err!(backend, emulator, Errno::EBADF);
@@ -1371,7 +1535,10 @@ pub fn syscall_socket<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator
     let protocol = ldr_i32!(backend, X2);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall socket(domain={:?}, type={:?}, protocol={})", domain, typ, protocol);
+        println!(
+            "syscall socket(domain={:?}, type={:?}, protocol={})",
+            domain, typ, protocol
+        );
     }
 
     let file_system = &mut emulator.inner_mut().file_system;
@@ -1391,7 +1558,10 @@ pub fn syscall_connect<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     let from = emulator.find_caller_name();
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall connect(sock_fd={}, addr=0x{:x}, addr_len={}) from {}", sock_fd, addr, addr_len, from);
+        println!(
+            "syscall connect(sock_fd={}, addr=0x{:x}, addr_len={}) from {}",
+            sock_fd, addr, addr_len, from
+        );
     }
 
     if from == "libc.so" {
@@ -1402,7 +1572,8 @@ pub fn syscall_connect<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
     if let Some(file) = file_system.get_file_mut(sock_fd) {
         match file {
             FileIO::LocalSocket(socket) => {
-                let ret = socket.connect(VMPointer::new(addr, 0, backend.clone()), addr_len, emulator);
+                let ret =
+                    socket.connect(VMPointer::new(addr, 0, backend.clone()), addr_len, emulator);
                 ret_i32!(backend, ret);
                 return;
             }
@@ -1461,7 +1632,10 @@ pub fn syscall_getrandom<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
     let _flags = ldr_u32!(backend, X2);
 
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-        println!("syscall getrandom(buf=0x{:x}, buflen={}, flags={})", buf, buflen, _flags);
+        println!(
+            "syscall getrandom(buf=0x{:x}, buflen={}, flags={})",
+            buf, buflen, _flags
+        );
     }
 
     if buflen == 0 {
@@ -1476,16 +1650,26 @@ pub fn syscall_getrandom<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmula
         .as_nanos() as u64;
     let mut state = seed ^ 0x6c62_272e_07bb_0142;
     for byte in random_bytes.iter_mut() {
-        state = state.wrapping_mul(0x5851_f42d_4c95_7f2d).wrapping_add(0x1405_7b7e_f767_814f);
+        state = state
+            .wrapping_mul(0x5851_f42d_4c95_7f2d)
+            .wrapping_add(0x1405_7b7e_f767_814f);
         *byte = (state >> 33) as u8;
     }
-    backend.mem_write(buf, &random_bytes).expect("failed to write getrandom buffer");
+    backend
+        .mem_write(buf, &random_bytes)
+        .expect("failed to write getrandom buffer");
 
     ret_i32!(backend, buflen as i32);
 }
 
 #[inline]
-fn open<T: Clone>(emulator: &AndroidEmulator<T>, path: &str, flags: OFlag, mode: i32, from_module: &str) -> (i32, i32) {
+fn open<T: Clone>(
+    emulator: &AndroidEmulator<T>,
+    path: &str,
+    flags: OFlag,
+    mode: i32,
+    from_module: &str,
+) -> (i32, i32) {
     if path == "/dev/__properties__" {
         let errno: i32 = Errno::EPERM.into();
         return (-errno, errno);
@@ -1493,42 +1677,52 @@ fn open<T: Clone>(emulator: &AndroidEmulator<T>, path: &str, flags: OFlag, mode:
 
     let file_system = &mut emulator.inner_mut().file_system;
     if path == "/dev/urandom" {
-        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(
-            URandom::new(path, flags.bits(), 0, StMode::SYSTEM_FILE)
-        )));
-        return (fd, 0)
+        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(URandom::new(
+            path,
+            flags.bits(),
+            0,
+            StMode::SYSTEM_FILE,
+        ))));
+        return (fd, 0);
     } else if path == "/proc/meminfo" {
-        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(
-            Meminfo::new(path, flags.bits())
-        )));
-        return (fd, 0)
+        let fd =
+            file_system.insert_file(FileIO::Dynamic(Box::new(Meminfo::new(path, flags.bits()))));
+        return (fd, 0);
     } else if path == "/proc/cpuinfo" {
-        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(
-            Cpuinfo::new(path, flags.bits())
-        )));
-        return (fd, 0)
+        let fd =
+            file_system.insert_file(FileIO::Dynamic(Box::new(Cpuinfo::new(path, flags.bits()))));
+        return (fd, 0);
     } else if path == "/proc/sys/kernel/random/boot_id" {
-        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(
-            RandomBootId::new(path, flags.bits())
-        )));
-        return (fd, 0)
+        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(RandomBootId::new(
+            path,
+            flags.bits(),
+        ))));
+        return (fd, 0);
     }
 
     if path == "/proc/stat" {
         return if from_module == "libc.so" {
             // 8个cpu?
             let mut buf = BytesMut::new();
-            buf.write_str("cpu 9160 11352 15848 9160 11352 1584 80 0 0 0").unwrap();
+            buf.write_str("cpu 9160 11352 15848 9160 11352 1584 80 0 0 0")
+                .unwrap();
             for i in 0..8 {
-                buf.write_str(format!("cpu{} 1145 1419 1981 1145 1419 198 10 0 0 0", i).as_str()).unwrap();
+                buf.write_str(format!("cpu{} 1145 1419 1981 1145 1419 198 10 0 0 0", i).as_str())
+                    .unwrap();
             }
-            let bytes_file = ByteArrayFileIO::new(buf.freeze().to_vec(), path.to_string(), 0, flags.bits(), StMode::SYSTEM_FILE);
+            let bytes_file = ByteArrayFileIO::new(
+                buf.freeze().to_vec(),
+                path.to_string(),
+                0,
+                flags.bits(),
+                StMode::SYSTEM_FILE,
+            );
             let fd = file_system.insert_file(FileIO::Bytes(bytes_file));
             (fd, 0)
         } else {
             let errno: i32 = Errno::EPERM.into();
             (-errno, errno)
-        }
+        };
     }
 
     if let Some(ref resolver) = file_system.file_resolver {
@@ -1551,16 +1745,14 @@ fn open<T: Clone>(emulator: &AndroidEmulator<T>, path: &str, flags: OFlag, mode:
                     let fd = file_system.insert_file(FileIO::Direction(dir));
                     (fd, 0)
                 }
-                FileIO::LocalSocket(_) => unreachable!()
-            }
+                FileIO::LocalSocket(_) => unreachable!(),
+            };
         }
     }
 
     if path == "/proc/self/maps" {
-        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(
-            Maps::new(path, flags.bits())
-        )));
-        return (fd, 0)
+        let fd = file_system.insert_file(FileIO::Dynamic(Box::new(Maps::new(path, flags.bits()))));
+        return (fd, 0);
     }
 
     let errno: i32 = Errno::ENOENT.into();

@@ -1,12 +1,12 @@
-use std::rc::Rc;
-use crate::android::dvm::DalvikVM64;
 use crate::android::dvm::member::DvmMember;
 use crate::android::dvm::object::DvmObject;
+use crate::android::dvm::DalvikVM64;
 use crate::android::jni;
 use crate::android::jni::{JniValue, JNI_FLAG_OBJECT, JNI_FLAG_REF};
 use crate::dalvik;
 use crate::emulator::AndroidEmulator;
 use crate::tool::UnicornArg;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct DvmClass {
@@ -17,7 +17,12 @@ pub struct DvmClass {
 }
 
 impl DvmClass {
-    pub(super) fn new(id: i64, name: &str, super_class: Option<Rc<DvmClass>>, interfaces: Option<Vec<Rc<DvmClass>>>) -> DvmClass {
+    pub(super) fn new(
+        id: i64,
+        name: &str,
+        super_class: Option<Rc<DvmClass>>,
+        interfaces: Option<Vec<Rc<DvmClass>>>,
+    ) -> DvmClass {
         DvmClass {
             id,
             name: format_class_name(name),
@@ -41,16 +46,24 @@ impl DvmClass {
         DvmObject::ObjectRef(object_id)
     }
 
-    pub fn call_static_method<T: Clone>(&self, emulator: &AndroidEmulator<T>, vm: &mut DalvikVM64<T>, method_name: &str, signature: &str, args: Vec<JniValue>) -> JniValue {
+    pub fn call_static_method<T: Clone>(
+        &self,
+        emulator: &AndroidEmulator<T>,
+        vm: &mut DalvikVM64<T>,
+        method_name: &str,
+        signature: &str,
+        args: Vec<JniValue>,
+    ) -> JniValue {
         let members = vm.members.get(&self.id).unwrap();
-        let method = members.iter().find(|m| {
-            match m {
+        let method = members
+            .iter()
+            .find(|m| match m {
                 DvmMember::Field(_) => false,
                 DvmMember::Method(method) => {
                     method.name == method_name && method.signature == signature
                 }
-            }
-        }).expect("member not found");
+            })
+            .expect("member not found");
         if let DvmMember::Method(method) = method {
             if !method.is_jni_method() {
                 panic!("method is not a jni method");

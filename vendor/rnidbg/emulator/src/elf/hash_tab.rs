@@ -1,7 +1,7 @@
-use anyhow::anyhow;
 use crate::elf::parser::{ElfFile, ElfParser};
 use crate::elf::symbol::ElfSymbol;
 use crate::elf::symbol_structure::ElfSymbolStructure;
+use anyhow::anyhow;
 
 #[derive(Clone)]
 pub enum HashTable {
@@ -35,16 +35,21 @@ impl ElfHashTable {
 
         let actual_length = (num_buckets + num_chains) * 4 + 8;
         if length != 0 && length != actual_length as usize {
-            panic!("Error reading string table (read {} bytes, expected to read {} bytes).", actual_length, length);
+            panic!(
+                "Error reading string table (read {} bytes, expected to read {} bytes).",
+                actual_length, length
+            );
         }
 
-        Self {
-            buckets,
-            chains,
-        }
+        Self { buckets, chains }
     }
 
-    pub fn get_symbol(&self, symbol_structure: &ElfSymbolStructure, symbol_name: &str, elf_file: &ElfFile) -> anyhow::Result<ElfSymbol> {
+    pub fn get_symbol(
+        &self,
+        symbol_structure: &ElfSymbolStructure,
+        symbol_name: &str,
+        elf_file: &ElfFile,
+    ) -> anyhow::Result<ElfSymbol> {
         let hash = sysv_hash(symbol_name) as usize;
         let mut index = self.buckets[hash % self.buckets.len()];
         loop {
@@ -59,7 +64,11 @@ impl ElfHashTable {
         }
     }
 
-    pub fn get_symbol_by_addr(&self, symbol_structure: &ElfSymbolStructure, so_addr: u64) -> anyhow::Result<ElfSymbol> {
+    pub fn get_symbol_by_addr(
+        &self,
+        symbol_structure: &ElfSymbolStructure,
+        so_addr: u64,
+    ) -> anyhow::Result<ElfSymbol> {
         for i in 0..self.buckets.len() {
             let index = self.buckets[i];
             if index == 0 {
@@ -106,7 +115,8 @@ impl ElfGnuHashTable {
         }
 
         //let mut chain_base = offset + 16 + maskwords as usize * if parser.object_size == 1 { 4 } else { 8 } + nbucket as usize * 4 - symndx as usize * 4;
-        let mut chain_base = offset + 16 + maskwords as usize * 8  + nbucket as usize * 4 - symndx as usize * 4;
+        let mut chain_base =
+            offset + 16 + maskwords as usize * 8 + nbucket as usize * 4 - symndx as usize * 4;
 
         ElfGnuHashTable {
             nbucket,
@@ -126,17 +136,23 @@ impl ElfGnuHashTable {
         self.parser.read_int()
     }
 
-    pub fn get_symbol(&self, symbol_structure: &ElfSymbolStructure, symbol_name: &str, elf_file: &ElfFile) -> anyhow::Result<ElfSymbol> {
+    pub fn get_symbol(
+        &self,
+        symbol_structure: &ElfSymbolStructure,
+        symbol_name: &str,
+        elf_file: &ElfFile,
+    ) -> anyhow::Result<ElfSymbol> {
         let hash = gnu_hash(symbol_name) as usize;
         let h2 = hash >> self.shift2;
 
         let word_num = (hash / self.bloom_mask_bits as usize) & self.maskwords as usize;
         let bloom_word = self.bloom_filter[word_num];
 
-        if (1 &
-            (bloom_word >> (hash % self.bloom_mask_bits as usize)) &
-            (bloom_word >> (h2 % self.bloom_mask_bits as usize))
-        ) == 0 {
+        if (1
+            & (bloom_word >> (hash % self.bloom_mask_bits as usize))
+            & (bloom_word >> (h2 % self.bloom_mask_bits as usize)))
+            == 0
+        {
             return Err(anyhow!("Symbol not found"));
         }
 
@@ -157,7 +173,11 @@ impl ElfGnuHashTable {
         }
     }
 
-    pub fn get_symbol_by_addr(&self, symbol_structure: &ElfSymbolStructure, so_addr: u64) -> anyhow::Result<ElfSymbol> {
+    pub fn get_symbol_by_addr(
+        &self,
+        symbol_structure: &ElfSymbolStructure,
+        so_addr: u64,
+    ) -> anyhow::Result<ElfSymbol> {
         for i in 0..self.nbucket as usize {
             let mut n = self.buckets[i];
             if n == 0 {

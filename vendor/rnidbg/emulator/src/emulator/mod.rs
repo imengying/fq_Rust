@@ -1,41 +1,44 @@
+mod consts;
 mod env_fixer;
 mod mem_hook;
-mod consts;
 
-pub mod syscall_handler;
-pub mod memory;
 pub mod func;
-pub mod trace;
-pub(crate) mod thread;
+pub mod memory;
 pub(crate) mod signal;
+pub mod syscall_handler;
+pub(crate) mod thread;
+pub mod trace;
 
-pub use syscall_handler::POST_CALLBACK_SYSCALL_NUMBER;
-pub use syscall_handler::PRE_CALLBACK_SYSCALL_NUMBER;
-pub use consts::{*};
-use crate::emulator::thread::{AbstractTask, Function64, RunnableTask, Task, TaskStatus, ThreadDispatcher, UniThreadDispatcher};
-use crate::linux::{LinuxModule, PAGE_ALIGN};
-use crate::linux::symbol::ModuleSymbol;
-use crate::linux::file_system::AndroidFileSystem;
-pub use crate::pointer::VMPointer;
-use crate::tool::UnicornArg;
 use crate::android::dvm::DalvikVM64;
 use crate::android::virtual_library::ld64::ArmLD64;
 use crate::android::virtual_library::libc::Libc;
-use crate::backend::{Backend, Permission, RegisterARM64};
-use crate::emulator::consts::{LR};
-use crate::memory::AndroidElfLoader;
-use crate::memory::svc_memory::SvcMemory;
 use crate::backend::Context;
+use crate::backend::{Backend, Permission, RegisterARM64};
+use crate::emulator::consts::LR;
+use crate::emulator::signal::ISignalTask;
+use crate::emulator::thread::{
+    AbstractTask, Function64, RunnableTask, Task, TaskStatus, ThreadDispatcher, UniThreadDispatcher,
+};
+use crate::linux::file_system::AndroidFileSystem;
+use crate::linux::symbol::ModuleSymbol;
+use crate::linux::{LinuxModule, PAGE_ALIGN};
+use crate::memory::svc_memory::SvcMemory;
+use crate::memory::AndroidElfLoader;
+pub use crate::pointer::VMPointer;
+use crate::tool::UnicornArg;
+use anyhow::anyhow;
+use bytes::{BufMut, Bytes, BytesMut};
+pub use consts::*;
+use log::{error, info, warn};
 use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use anyhow::anyhow;
-use bytes::{BufMut, Bytes, BytesMut};
-use log::{error, info, warn};
-use crate::emulator::signal::ISignalTask;
+use std::sync::Arc;
+pub use syscall_handler::CUSTOM_SVC_SYSCALL_NUMBER;
+pub use syscall_handler::POST_CALLBACK_SYSCALL_NUMBER;
+pub use syscall_handler::PRE_CALLBACK_SYSCALL_NUMBER;
 
 pub type RcUnsafeCell<T> = Rc<UnsafeCell<T>>;
 pub type ArcUnsafeCell<T> = Arc<UnsafeCell<T>>;
@@ -84,8 +87,13 @@ struct Arm64CpReg {
     val: u64,
 }
 
-impl <'a, T: Clone> AndroidEmulator<'a, T> {
-    pub fn new(pid: u32, ppid: u32, proc_name: String, data: T) -> anyhow::Result<AndroidEmulator<'static, T>> {
+impl<'a, T: Clone> AndroidEmulator<'a, T> {
+    pub fn new(
+        pid: u32,
+        ppid: u32,
+        proc_name: String,
+        data: T,
+    ) -> anyhow::Result<AndroidEmulator<'static, T>> {
         let backend = Backend::new(data);
         let mut svc = SvcMemory::new(&backend)?; // ARMSvcMemory
 
@@ -114,7 +122,7 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
                 brk: 0,
                 base_path: std::env::var("BASE_PATH").unwrap_or("./android/sdk23".to_string()),
             })),
-            backend
+            backend,
         })
     }
 
@@ -171,7 +179,8 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
         if errno_ptr != 0 {
             let mut buf = BytesMut::new();
             buf.put_i32_le(errno);
-            self.backend.mem_write(errno_ptr, &buf)
+            self.backend
+                .mem_write(errno_ptr, &buf)
                 .map_err(|e| anyhow!("failed to set errno: {:?}", e))?;
             return Ok(());
         }
@@ -179,7 +188,12 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     }
 
     pub(crate) fn setup_traps(&mut self) -> anyhow::Result<()> {
-        self.backend.mem_map(LR, PAGE_ALIGN, (Permission::READ | Permission::EXEC | Permission::WRITE).bits())
+        self.backend
+            .mem_map(
+                LR,
+                PAGE_ALIGN,
+                (Permission::READ | Permission::EXEC | Permission::WRITE).bits(),
+            )
             .map_err(|e| anyhow!("failed to setup traps: {:?}", e))?;
         let mut buf = BytesMut::with_capacity(PAGE_ALIGN);
         let code = -738197503i32;
@@ -189,11 +203,12 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
             buf.put_i32_le(code);
             i += 4;
             if i >= PAGE_ALIGN {
-                break
+                break;
             }
         }
 
-        self.backend.mem_write(LR, &buf.freeze())
+        self.backend
+            .mem_write(LR, &buf.freeze())
             .map_err(|e| anyhow!("failed to setup traps: {:?}", e))?;
 
         Ok(())
@@ -210,28 +225,26 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     }
 
     pub(crate) fn get_lr(&self) -> anyhow::Result<u64> {
-        self.backend.reg_read(RegisterARM64::LR)
+        self.backend
+            .reg_read(RegisterARM64::LR)
             .map_err(|e| anyhow!("get lr failed: {:?}", e))
     }
 
     pub fn get_current_pid(&self) -> u32 {
         match self.inner_mut().thread_dispatcher.running_task() {
             None => self.inner_mut().pid,
-            Some(task_cell) => {
-                match unsafe { &*task_cell.get() } {
-                    AbstractTask::Function64(_) => self.inner_mut().pid,
-                    AbstractTask::SignalTask(task) => task.task_id() as u32,
-                    AbstractTask::MarshmallowThread(thread) => thread.get_id(),
-                    AbstractTask::KitKatThread(_) => unreachable!()
-                }
-            }
+            Some(task_cell) => match unsafe { &*task_cell.get() } {
+                AbstractTask::Function64(_) => self.inner_mut().pid,
+                AbstractTask::SignalTask(task) => task.task_id() as u32,
+                AbstractTask::MarshmallowThread(thread) => thread.get_id(),
+                AbstractTask::KitKatThread(_) => unreachable!(),
+            },
         }
     }
 
     pub fn find_caller(&self) -> Option<RcUnsafeCell<LinuxModule<'a, T>>> {
         let lr = self.get_lr().unwrap();
-        self.inner_mut().memory
-            .find_module_by_address(lr)
+        self.inner_mut().memory.find_module_by_address(lr)
     }
 
     pub(crate) fn find_caller_name(&self) -> String {
@@ -247,7 +260,8 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     pub(crate) fn pop_context(&self) -> Option<i32> {
         let mut stack = &mut self.inner_mut().context_stack;
         if let Some((context, off)) = stack.pop() {
-            self.backend.context_restore(&context)
+            self.backend
+                .context_restore(&context)
                 .expect("failed to restore context");
             drop(context);
             return Some(off);
@@ -258,7 +272,8 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     pub(crate) fn push_context(&self, context: Context, off: i32) {
         let mut stack = &mut self.inner_mut().context_stack;
         let mut context = context;
-        self.backend.context_save(&mut context)
+        self.backend
+            .context_save(&mut context)
             .expect("failed to save context");
         stack.push((context, off));
     }
@@ -269,7 +284,8 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
         }
 
         if self.inner_mut().running.load(Ordering::SeqCst) {
-            self.backend.emu_stop(TaskStatus::X, self)
+            self.backend
+                .emu_stop(TaskStatus::X, self)
                 .expect("failed to stop emulator");
             panic!("emulator is running");
         }
@@ -277,13 +293,19 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
         self.inner_mut().running.store(true, Ordering::SeqCst);
         self.set_task_status(TaskStatus::R)
             .expect("failed to set task status");
-        self.backend.emu_start(begin, until, 0, 0)
+        self.backend
+            .emu_start(begin, until, 0, 0)
             .map_err(|e| error!("failed to start emulator: {:?}", e))
             .expect("failed to start emulator");
         self.inner_mut().running.store(false, Ordering::SeqCst);
 
         if self.get_task_status() != TaskStatus::X {
-            return None;
+            let pc = self.backend.reg_read(RegisterARM64::PC).unwrap_or(0);
+            if pc == until {
+                let _ = self.set_task_status(TaskStatus::X);
+            } else {
+                return None;
+            }
         }
 
         let x0 = self.backend.reg_read(RegisterARM64::X0).unwrap();
@@ -292,7 +314,10 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     }
 
     pub fn set_task_status(&self, status: TaskStatus) -> anyhow::Result<()> {
-        let task = self.inner_mut().context_task.as_ref()
+        let task = self
+            .inner_mut()
+            .context_task
+            .as_ref()
             .ok_or(anyhow!("task is none"))?;
         let task = unsafe { &mut *task.get() };
         match task {
@@ -305,7 +330,10 @@ impl <'a, T: Clone> AndroidEmulator<'a, T> {
     }
 
     pub fn get_task_status(&self) -> TaskStatus {
-        let task = self.inner_mut().context_task.as_ref()
+        let task = self
+            .inner_mut()
+            .context_task
+            .as_ref()
             .expect("task is none");
         let task = unsafe { &mut *task.get() };
         match task {
@@ -325,7 +353,8 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
     }
 
     pub fn emu_stop(&self, status: TaskStatus) -> anyhow::Result<()> {
-        self.backend.emu_stop(status, self)
+        self.backend
+            .emu_stop(status, self)
             .map_err(|e| anyhow!("failed to stop emulator: {:?}", e))
     }
 
@@ -351,7 +380,7 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                 //panic!("task count: {}", task_count);
             } else {
                 //self.memory().release_tmp_memory();
-                break
+                break;
             }
         }
 

@@ -1,14 +1,14 @@
-use std::process::exit;
-use log::error;
-#[cfg(feature = "unicorn_backend")]
-use unicorn_engine::{RegisterARM64, Unicorn};
-#[cfg(feature = "unicorn_backend")]
-use unicorn_engine::RegisterARM64::{*};
-#[cfg(feature = "unicorn_backend")]
-use unicorn_engine::unicorn_const::{HookType, MemType, Permission};
 use crate::backend::Backend;
 use crate::emulator::AndroidEmulator;
 use crate::pointer::VMPointer;
+use log::error;
+use std::process::exit;
+#[cfg(feature = "unicorn_backend")]
+use unicorn_engine::unicorn_const::{HookType, MemType, Permission};
+#[cfg(feature = "unicorn_backend")]
+use unicorn_engine::RegisterARM64::*;
+#[cfg(feature = "unicorn_backend")]
+use unicorn_engine::{RegisterARM64, Unicorn};
 
 #[cfg(feature = "unicorn_backend")]
 const PAGE_SIZE: u64 = 0x1000;
@@ -28,7 +28,10 @@ fn mirror_tagged_page<T: Clone>(backend: &mut Unicorn<T>, addr: u64) -> bool {
     if backend.mem_read(untagged_page, &mut page).is_err() {
         return false;
     }
-    if backend.mem_map(tagged_page, PAGE_SIZE as usize, Permission::ALL).is_err() {
+    if backend
+        .mem_map(tagged_page, PAGE_SIZE as usize, Permission::ALL)
+        .is_err()
+    {
         return false;
     }
     if backend.mem_write(tagged_page, &page).is_err() {
@@ -38,7 +41,14 @@ fn mirror_tagged_page<T: Clone>(backend: &mut Unicorn<T>, addr: u64) -> bool {
 }
 
 #[cfg(feature = "unicorn_backend")]
-fn mem_hook_unmapped_unicorn<T: Clone>(hook_type: HookType, backend: &mut Unicorn<T>, mem_type: MemType, addr: u64, size: usize, value: i64) -> bool {
+fn mem_hook_unmapped_unicorn<T: Clone>(
+    hook_type: HookType,
+    backend: &mut Unicorn<T>,
+    mem_type: MemType,
+    addr: u64,
+    size: usize,
+    value: i64,
+) -> bool {
     // For reads from very low addresses (e.g. NULL pointer dereference from locale code),
     // map a zero-filled page so the read returns 0 and execution continues.
     // This is necessary because bionic libc's locale functions may dereference a NULL/small
@@ -50,7 +60,15 @@ fn mem_hook_unmapped_unicorn<T: Clone>(hook_type: HookType, backend: &mut Unicor
     if mirror_tagged_page(backend, addr) {
         return true;
     }
-    error!("{:?}::{:?}  memory failed: address=0x{:X}, size={}, value=0x{:X}, LR=0x{:X}", hook_type, mem_type, addr, size, value, backend.reg_read(RegisterARM64::LR).unwrap());
+    error!(
+        "{:?}::{:?}  memory failed: address=0x{:X}, size={}, value=0x{:X}, LR=0x{:X}",
+        hook_type,
+        mem_type,
+        addr,
+        size,
+        value,
+        backend.reg_read(RegisterARM64::LR).unwrap()
+    );
     backend.dump_context(addr, size);
     false
 }
@@ -59,15 +77,69 @@ fn mem_hook_unmapped_unicorn<T: Clone>(hook_type: HookType, backend: &mut Unicor
 pub fn register_mem_err_handler<T: Clone>(backend: Backend<T>) {
     #[cfg(feature = "unicorn_backend")]
     if let Backend::Unicorn(unicorn) = backend {
-        unicorn.add_mem_hook(HookType::MEM_READ_UNMAPPED, 1, 0, |backend: &mut Unicorn<'_, T>, mem_type: MemType, addr: u64, size: usize, value: i64| {
-            mem_hook_unmapped_unicorn(HookType::MEM_READ_UNMAPPED, backend, mem_type, addr, size, value)
-        }).expect("failed to add MEM_READ_UNMAPPED hook");
-        unicorn.add_mem_hook(HookType::MEM_WRITE_UNMAPPED, 1, 0, |backend: &mut Unicorn<'_, T>, mem_type: MemType, addr: u64, size: usize, value: i64| {
-            mem_hook_unmapped_unicorn(HookType::MEM_WRITE_UNMAPPED, backend, mem_type, addr, size, value)
-        }).expect("failed to add MEM_WRITE_UNMAPPED hook");
-        unicorn.add_mem_hook(HookType::MEM_FETCH_UNMAPPED, 1, 0, |backend: &mut Unicorn<'_, T>, mem_type: MemType, addr: u64, size: usize, value: i64| {
-            mem_hook_unmapped_unicorn(HookType::MEM_FETCH_UNMAPPED, backend, mem_type, addr, size, value)
-        }).expect("failed to add MEM_FETCH_UNMAPPED hook");
+        unicorn
+            .add_mem_hook(
+                HookType::MEM_READ_UNMAPPED,
+                1,
+                0,
+                |backend: &mut Unicorn<'_, T>,
+                 mem_type: MemType,
+                 addr: u64,
+                 size: usize,
+                 value: i64| {
+                    mem_hook_unmapped_unicorn(
+                        HookType::MEM_READ_UNMAPPED,
+                        backend,
+                        mem_type,
+                        addr,
+                        size,
+                        value,
+                    )
+                },
+            )
+            .expect("failed to add MEM_READ_UNMAPPED hook");
+        unicorn
+            .add_mem_hook(
+                HookType::MEM_WRITE_UNMAPPED,
+                1,
+                0,
+                |backend: &mut Unicorn<'_, T>,
+                 mem_type: MemType,
+                 addr: u64,
+                 size: usize,
+                 value: i64| {
+                    mem_hook_unmapped_unicorn(
+                        HookType::MEM_WRITE_UNMAPPED,
+                        backend,
+                        mem_type,
+                        addr,
+                        size,
+                        value,
+                    )
+                },
+            )
+            .expect("failed to add MEM_WRITE_UNMAPPED hook");
+        unicorn
+            .add_mem_hook(
+                HookType::MEM_FETCH_UNMAPPED,
+                1,
+                0,
+                |backend: &mut Unicorn<'_, T>,
+                 mem_type: MemType,
+                 addr: u64,
+                 size: usize,
+                 value: i64| {
+                    mem_hook_unmapped_unicorn(
+                        HookType::MEM_FETCH_UNMAPPED,
+                        backend,
+                        mem_type,
+                        addr,
+                        size,
+                        value,
+                    )
+                },
+            )
+            .expect("failed to add MEM_FETCH_UNMAPPED hook");
         unicorn.add_mem_hook(HookType::MEM_INVALID, 1, 0, |backend: &mut Unicorn<'_, T>, mem_type: MemType, addr: u64, size: usize, value: i64| {
             error!("MEM_INVALID::{:?}  memory failed: address=0x{:X}, size={}, value=0x{:X}, LR=0x{:X}", mem_type, addr, size, value, backend.reg_read(RegisterARM64::LR).unwrap());
             backend.emu_stop().unwrap();

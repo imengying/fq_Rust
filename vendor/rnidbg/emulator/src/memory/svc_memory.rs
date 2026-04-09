@@ -1,14 +1,15 @@
-
+use crate::backend::{Backend, Permission};
+use crate::emulator::{
+    AndroidEmulator, VMPointer, CUSTOM_SVC_SYSCALL_NUMBER, SVC_BASE, SVC_MAX, SVC_SIZE,
+};
+use crate::tool::align_size;
+use anyhow::anyhow;
+use bytes::{BufMut, BytesMut};
+use log::{debug, info};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
-use log::{debug, info};
-use crate::backend::{Backend, Permission};
-use crate::emulator::{AndroidEmulator, VMPointer, SVC_BASE, SVC_MAX, SVC_SIZE};
-use crate::tool::align_size;
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -19,14 +20,14 @@ pub struct SvcMemRegion {
     pub perms: Permission,
     pub label: String,
     pub library_file_path: Option<String>,
-    pub offset: u64
+    pub offset: u64,
 }
 
 pub struct SvcMemory<'a, T: Clone> {
     base: VMPointer<'a, T>,
     mem_region: Vec<SvcMemRegion>,
     arm_svc_number: u32,
-    svc_map: HashMap<u32, Box<dyn Arm64Svc<T> + 'a>>
+    svc_map: HashMap<u32, Box<dyn Arm64Svc<T> + 'a>>,
 }
 
 impl<'a, T: Clone> SvcMemory<'a, T> {
@@ -37,19 +38,28 @@ impl<'a, T: Clone> SvcMemory<'a, T> {
 
 impl<'a, T: Clone> SvcMemory<'a, T> {
     pub fn new(backend: &Backend<'a, T>) -> anyhow::Result<SvcMemory<'a, T>> {
-        backend.mem_map(SVC_BASE, SVC_SIZE, (Permission::READ | Permission::EXEC).bits())
+        backend
+            .mem_map(
+                SVC_BASE,
+                SVC_SIZE,
+                (Permission::READ | Permission::EXEC).bits(),
+            )
             .map_err(|e| anyhow!("init svc failed: {:?}", e))?;
         Ok(SvcMemory {
             base: VMPointer::new(SVC_BASE, SVC_SIZE, backend.clone()),
             mem_region: Vec::new(),
             arm_svc_number: 0x200, // 避免占用系统调用
-            svc_map: HashMap::new()
+            svc_map: HashMap::new(),
         })
     }
 
     pub fn register_svc(&mut self, svc_box: Box<dyn Arm64Svc<T> + 'a>) -> u64 {
         if option_env!("PRINT_SVC_REGISTER").unwrap_or("") == "1" {
-            debug!("register_svc: name={}, svc_number=0x{:x}", &svc_box.name(), self.arm_svc_number + 1);
+            debug!(
+                "register_svc: name={}, svc_number=0x{:x}",
+                &svc_box.name(),
+                self.arm_svc_number + 1
+            );
         }
         let pointer = unsafe {
             let number = {
@@ -69,7 +79,10 @@ impl<'a, T: Clone> SvcMemory<'a, T> {
         let mut pointer = self.base.share(0);
 
         if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
-            debug!("svc allocate: base=0x{:X}, size={}, label={}", pointer.addr, size, label);
+            debug!(
+                "svc allocate: base=0x{:X}, size={}, label={}",
+                pointer.addr, size, label
+            );
         }
 
         self.base = pointer.share(size as i64);
@@ -82,7 +95,7 @@ impl<'a, T: Clone> SvcMemory<'a, T> {
             perms: Permission::READ | Permission::EXEC,
             label: label.to_string(),
             offset: 0,
-            library_file_path: None
+            library_file_path: None,
         });
 
         pointer
@@ -100,7 +113,13 @@ pub fn assemble_svc(number: u32) -> u32 {
 pub trait HookListener<'a, T: Clone> {
     // long hook(SvcMemory svcMemory, String libraryName, String symbolName, long old);
     // HookListener 返回0表示没有hook，否则返回hook以后的调用地址
-    fn hook(&self, emu: &AndroidEmulator<'a, T>, lib_name: String, symbol_name: String, old: u64) -> u64;
+    fn hook(
+        &self,
+        emu: &AndroidEmulator<'a, T>,
+        lib_name: String,
+        symbol_name: String,
+        old: u64,
+    ) -> u64;
 }
 
 pub trait Arm64Svc<T: Clone> {
@@ -108,17 +127,22 @@ pub trait Arm64Svc<T: Clone> {
 
     /// 通过SVC实现JNI函数的调用
     fn on_register(&self, svc: &mut SvcMemory<T>, number: u32) -> u64 {
-        let mut buf = BytesMut::new();
-        buf.put_u32_le(assemble_svc(number)); // "svc #0x" + svcNumber
-        buf.put_u32_le(0xd65f03c0); // ret
+        let code = [
+            &format!("mov x12, #0x{:x}", number),
+            &format!("mov x16, #0x{:x}", CUSTOM_SVC_SYSCALL_NUMBER),
+            "svc #0",
+            "ret",
+        ]
+        .join("\n");
+        let code = crate::keystone::assemble_no_check(&code);
 
         {
-            let ptr = svc.allocate(buf.len(), format!("Arm64Svc.{}", self.name()).as_str());
-            ptr.write_bytes(buf.freeze()).unwrap();
+            let ptr = svc.allocate(code.len(), format!("Arm64Svc.{}", self.name()).as_str());
+            ptr.write_buf(code).unwrap();
             return ptr.addr;
         }
-        let ptr = svc.allocate(buf.len(), "Arm64Svc");
-        ptr.write_bytes(buf.freeze()).unwrap();
+        let ptr = svc.allocate(code.len(), "Arm64Svc");
+        ptr.write_buf(code).unwrap();
         ptr.addr
     }
 
@@ -135,7 +159,7 @@ pub trait Arm64Svc<T: Clone> {
 
 pub struct SimpleArm64Svc<T: Clone> {
     pub name: String,
-    pub handle: fn(name: &str, &AndroidEmulator<T>) -> SvcCallResult
+    pub handle: fn(name: &str, &AndroidEmulator<T>) -> SvcCallResult,
 }
 
 impl<T: Clone> Arm64Svc<T> for SimpleArm64Svc<T> {
@@ -152,7 +176,7 @@ impl<T: Clone> Arm64Svc<T> for SimpleArm64Svc<T> {
 pub enum SvcCallResult {
     VOID,
     FUCK(anyhow::Error),
-    RET(i64)
+    RET(i64),
 }
 
 impl SvcCallResult {
@@ -198,10 +222,13 @@ impl SvcCallResult {
 // }
 
 impl<T: Clone> SimpleArm64Svc<T> {
-    pub fn new(name: &str, handle: fn(&str, &AndroidEmulator<T>) -> SvcCallResult) -> Box<SimpleArm64Svc<T>> {
+    pub fn new(
+        name: &str,
+        handle: fn(&str, &AndroidEmulator<T>) -> SvcCallResult,
+    ) -> Box<SimpleArm64Svc<T>> {
         Box::new(SimpleArm64Svc {
             name: name.to_string(),
-            handle
+            handle,
         })
     }
 }

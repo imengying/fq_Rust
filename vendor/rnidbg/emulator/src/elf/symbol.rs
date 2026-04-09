@@ -1,7 +1,7 @@
-use anyhow::anyhow;
-use crate::elf::abi::{*};
+use crate::elf::abi::*;
 use crate::elf::parser::{ElfFile, ElfParser};
 use crate::elf::str_tab::ElfStringTable;
+use anyhow::anyhow;
 
 const SHN_UNDEF: i16 = 0;
 
@@ -28,7 +28,7 @@ impl ElfSymbol {
         let info;
         let other;
         let section_header_ndx;
-/*        if parser.object_size == 1 { // CLASS_32
+        /*        if parser.object_size == 1 { // CLASS_32
             name_ndx = parser.read_int();
             value = parser.read_int_or_long();
             size = parser.read_int_or_long();
@@ -59,7 +59,7 @@ impl ElfSymbol {
             section_header_ndx,
             section_type: typ,
             offset,
-            string_table: None
+            string_table: None,
         }
     }
 
@@ -69,9 +69,9 @@ impl ElfSymbol {
 
     pub fn matches(&self, soaddr: u64) -> bool {
         let value = self.value & !1i64;
-        return self.section_header_ndx != SHN_UNDEF &&
-            soaddr >= value as u64 &&
-            soaddr < value as u64 + self.size as u64;
+        return self.section_header_ndx != SHN_UNDEF
+            && soaddr >= value as u64
+            && soaddr < value as u64 + self.size as u64;
     }
 
     pub fn set_string_table(&mut self, string_table: ElfStringTable) {
@@ -90,7 +90,7 @@ impl ElfSymbol {
         if let Some(strtab) = &self.string_table {
             return Ok(strtab.get(self.name_ndx as usize));
         }
-        
+
         if self.section_type as u32 == SHT_SYMTAB {
             let str_tab = elf_file.get_string_table()?;
             return Ok(str_tab.get(self.name_ndx as usize));
@@ -100,7 +100,7 @@ impl ElfSymbol {
             let dyn_str_tab = elf_file.get_dynamic_string_table()?;
             return Ok(dyn_str_tab.get(self.name_ndx as usize));
         }
-        
+
         Err(anyhow!("Failed to get symbol name"))
     }
 }

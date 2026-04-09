@@ -1,25 +1,25 @@
-mod waiter;
-mod task;
 mod base_task;
 mod covered_task;
-mod main_task;
 mod function64;
+mod linux_thread;
+mod main_task;
+mod task;
 mod thread_dispatcher;
 mod thread_task;
-mod linux_thread;
+mod waiter;
 
-use crate::emulator::AndroidEmulator;
 use crate::emulator::func::FunctionCall;
-pub use waiter::{*};
-pub use task::Task;
+use crate::emulator::AndroidEmulator;
 pub use base_task::BaseTask;
 pub use covered_task::CoveredTask;
-pub use main_task::{*};
+pub use covered_task::*;
 pub use function64::Function64;
-pub use thread_task::{*};
-pub use thread_dispatcher::{*};
-pub use covered_task::{*};
-pub use linux_thread::{*};
+pub use linux_thread::*;
+pub use main_task::*;
+pub use task::Task;
+pub use thread_dispatcher::*;
+pub use thread_task::*;
+pub use waiter::*;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
@@ -31,7 +31,7 @@ pub enum TaskStatus {
     X,
     I,
     K,
-    W
+    W,
 }
 
 pub trait RunnableTask<'a, T: Clone> {
@@ -57,7 +57,11 @@ pub trait RunnableTask<'a, T: Clone> {
 
     fn push_function(&mut self, emulator: &AndroidEmulator<'a, T>, call: FunctionCall);
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall>;
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall>;
 
     fn get_task_status(&self) -> TaskStatus;
 

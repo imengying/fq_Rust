@@ -23,7 +23,8 @@ impl DevicePoolManager {
         startup_name: Option<String>,
         rotate_cooldown_ms: u64,
     ) -> Self {
-        let active_index = resolve_active_index(&active_profile, &profiles, startup_name.as_deref());
+        let active_index =
+            resolve_active_index(&active_profile, &profiles, startup_name.as_deref());
         let manager = Self {
             inner: Arc::new(Mutex::new(DevicePoolState {
                 active_profile,
@@ -36,9 +37,7 @@ impl DevicePoolManager {
         let current = manager.current_profile();
         info!(
             "device profile initialized: name={}, device_id={}, install_id={}",
-            current.name,
-            current.device.device_id,
-            current.device.install_id
+            current.name, current.device.device_id, current.device.install_id
         );
         manager
     }
@@ -158,7 +157,10 @@ fn resolve_active_index(
         }
     }
 
-    profiles.iter().position(|profile| profile == active_profile).or(Some(0))
+    profiles
+        .iter()
+        .position(|profile| profile == active_profile)
+        .or(Some(0))
 }
 
 fn next_rotation_index(current_index: Option<usize>, len: usize) -> Option<usize> {
@@ -191,12 +193,8 @@ mod tests {
     fn rotates_to_next_profile() {
         let dev01 = profile("dev01", "device-1");
         let dev02 = profile("dev02", "device-2");
-        let manager = DevicePoolManager::new(
-            dev01.clone(),
-            vec![dev01.clone(), dev02.clone()],
-            None,
-            0,
-        );
+        let manager =
+            DevicePoolManager::new(dev01.clone(), vec![dev01.clone(), dev02.clone()], None, 0);
 
         assert!(manager.rotate_if_allowed("TEST"));
         assert_eq!(manager.current_profile().name, "dev02");
@@ -206,7 +204,12 @@ mod tests {
     fn respects_startup_name_for_index_tracking() {
         let dev01 = profile("dev01", "device-1");
         let dev02 = profile("dev02", "device-2");
-        let manager = DevicePoolManager::new(dev02.clone(), vec![dev01, dev02], Some("dev02".to_string()), 0);
+        let manager = DevicePoolManager::new(
+            dev02.clone(),
+            vec![dev01, dev02],
+            Some("dev02".to_string()),
+            0,
+        );
 
         assert!(manager.rotate_if_allowed("TEST"));
         assert_eq!(manager.current_profile().name, "dev01");

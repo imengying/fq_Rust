@@ -1,17 +1,19 @@
+use crate::emulator::func::FunctionCall;
+use crate::emulator::signal::{ISignalTask, SavableSignalTask, SigSet, SignalOps, SignalTask};
+use crate::emulator::thread::main_task::LuoTask;
+use crate::emulator::thread::{
+    AbstractTask, BaseTask, DestroyListener, RunnableTask, Task, TaskStatus, Waiter, WaiterTrait,
+};
+use crate::emulator::AndroidEmulator;
+use log::info;
 use std::cell::UnsafeCell;
 use std::rc::Rc;
-use log::info;
-use crate::emulator::AndroidEmulator;
-use crate::emulator::func::FunctionCall;
-use crate::emulator::signal::{SavableSignalTask, SignalOps, ISignalTask, SigSet, SignalTask};
-use crate::emulator::thread::{AbstractTask, BaseTask, DestroyListener, RunnableTask, Task, TaskStatus, Waiter, WaiterTrait};
-use crate::emulator::thread::main_task::LuoTask;
 
 pub struct CoveredTask<'a, T: Clone> {
     id: u32,
     pub(crate) base_task: BaseTask<'a, T>,
     signal_task_list: Vec<SavableSignalTask<'a, T>>,
-    signal_ops: Rc<UnsafeCell<CoveredTaskSignalOps>>
+    signal_ops: Rc<UnsafeCell<CoveredTaskSignalOps>>,
 }
 
 pub struct CoveredTaskSignalOps {
@@ -96,7 +98,11 @@ impl<'a, T: Clone> RunnableTask<'a, T> for CoveredTask<'a, T> {
         self.base_task.push_function(emulator, call);
     }
 
-    fn pop_function(&mut self, emulator: &AndroidEmulator<'a, T>, address: u64) -> Option<FunctionCall> {
+    fn pop_function(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        address: u64,
+    ) -> Option<FunctionCall> {
         self.base_task.pop_function(emulator, address)
     }
 
@@ -114,7 +120,11 @@ impl<'a, T: Clone> Task<'a, T> for CoveredTask<'a, T> {
         self.id
     }
 
-    fn dispatch_inner(&mut self, emulator: &AndroidEmulator<'a, T>, luo_task: &dyn LuoTask<'a, T>) -> anyhow::Result<Option<u64>> {
+    fn dispatch_inner(
+        &mut self,
+        emulator: &AndroidEmulator<'a, T>,
+        luo_task: &dyn LuoTask<'a, T>,
+    ) -> anyhow::Result<Option<u64>> {
         panic!("这不是梦开始的地方！")
     }
 
@@ -144,7 +154,8 @@ impl<'a, T: Clone> Task<'a, T> for CoveredTask<'a, T> {
                 }
             }
         }
-        self.signal_task_list.push(Rc::new(UnsafeCell::new(AbstractTask::SignalTask(task))));
+        self.signal_task_list
+            .push(Rc::new(UnsafeCell::new(AbstractTask::SignalTask(task))));
     }
 
     fn get_signal_task_list(&self) -> &Vec<SavableSignalTask<'a, T>> {
@@ -154,14 +165,13 @@ impl<'a, T: Clone> Task<'a, T> for CoveredTask<'a, T> {
     fn remove_signal_task(&mut self, task_cell: SavableSignalTask<'a, T>) {
         let task_id = match unsafe { &*task_cell.get() } {
             AbstractTask::SignalTask(task) => task.task_id(),
-            _ => panic!("奔跑在人群里面")
+            _ => panic!("奔跑在人群里面"),
         };
-        self.signal_task_list.retain(|t| {
-            match unsafe { &*t.get() } {
+        self.signal_task_list
+            .retain(|t| match unsafe { &*t.get() } {
                 AbstractTask::SignalTask(task) => task.task_id() != task_id,
-                _ => panic!("偶尔和孤单遇见")
-            }
-        });
+                _ => panic!("偶尔和孤单遇见"),
+            });
     }
 
     fn set_errno(&self, emulator: &AndroidEmulator<'a, T>, errno: i32) -> bool {
