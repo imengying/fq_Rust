@@ -172,9 +172,9 @@ impl<'a, T: Clone> RunnableTask<'a, T> for BaseTask<'a, T> {
     }
 
     fn destroy(&self, emulator: &AndroidEmulator<'a, T>) {
-        if let Some(memory_block) = &self.stack_block {
-            memory_block.free(Some(emulator.clone()))
-        }
+        // Some signer workloads still execute or inspect data near task teardown.
+        // Releasing the emulated task stack here can trigger late fetches into
+        // unmapped memory under Unicorn, so keep the stack mapped for process life.
 
         if let Some(context) = &self.context {
             context.release();
