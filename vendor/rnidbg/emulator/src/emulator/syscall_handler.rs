@@ -444,6 +444,9 @@ fn syscall<'a, T: Clone>(
         Syscalls::__NR_pipe2 => {
             syscalls::syscall_pipe2(backend, emulator);
         }
+        Syscalls::__NR3264_fcntl => {
+            syscalls::syscall_nr3264_fcntl(backend, emulator);
+        }
         Syscalls::__NR_getrandom => {
             syscalls::syscall_getrandom(backend, emulator);
         }
@@ -528,6 +531,7 @@ pub(crate) fn register_syscall_handler<T: Clone>(emu: &AndroidEmulator<T>) {
 pub fn get_syscall(syscall: u64) -> Option<Syscalls> {
     match syscall {
         0 => Some(Syscalls::__NR_io_setup),
+        25 => Some(Syscalls::__NR3264_fcntl),
         34 => Some(Syscalls::__NR_mkdirat),
         48 => Some(Syscalls::__NR_faccessat),
         56 => Some(Syscalls::__NR_openat),

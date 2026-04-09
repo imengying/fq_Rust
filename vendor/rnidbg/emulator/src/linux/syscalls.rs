@@ -1622,8 +1622,57 @@ pub fn syscall_pipe2<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<
     let write_pipe = read_pipe.clone();*/
 }
 
+const F_GETFD: i32 = 1;
+const F_SETFD: i32 = 2;
+const F_GETFL: i32 = 3;
+const F_SETFL: i32 = 4;
+
 pub fn syscall_nr3264_fcntl<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
-    panic!();
+    let fd = ldr_i32!(backend, X0);
+    let cmd = ldr_i32!(backend, X1);
+    let arg = ldr_u64!(backend, X2);
+
+    if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+        println!("syscall fcntl(fd={}, cmd={}, arg=0x{:x})", fd, cmd, arg);
+    }
+
+    let file_system = &mut emulator.inner_mut().file_system;
+    let Some(file) = file_system.get_file_mut(fd) else {
+        throw_err!(backend, emulator, Errno::EBADF);
+    };
+
+    match cmd {
+        F_GETFD => {
+            ret_i32!(backend, 0);
+        }
+        F_SETFD => {
+            ret_i32!(backend, 0);
+        }
+        F_GETFL => {
+            let flags = match file {
+                FileIO::Bytes(file) => file.oflags().bits() as i32,
+                FileIO::File(file) => file.oflags().bits() as i32,
+                FileIO::Error(errno) => {
+                    emulator.set_errno(*errno).expect("failed to set errno");
+                    ret_i32!(backend, -1);
+                    return;
+                }
+                FileIO::Dynamic(file) => file.oflags().bits() as i32,
+                FileIO::Direction(_) => 0,
+                FileIO::LocalSocket(_) => 0,
+            };
+            ret_i32!(backend, flags);
+        }
+        F_SETFL => {
+            ret_i32!(backend, 0);
+        }
+        _ => {
+            if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
+                println!("fcntl fallback success for unsupported cmd={}", cmd);
+            }
+            ret_i32!(backend, 0);
+        }
+    }
 }
 
 pub fn syscall_getrandom<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
