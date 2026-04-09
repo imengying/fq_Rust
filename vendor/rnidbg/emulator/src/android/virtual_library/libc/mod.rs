@@ -57,13 +57,10 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
             "sub sp, sp, #0x10",
             "stp x29, x30, [sp]",
             &format!("svc #0x{:x}", number),
-            "ldr x13, [sp]",
-            "add sp, sp, #0x8",
-            "cmp x13, #0",
+            "cmp x0, #0",
             "b.eq #0x8",
-            "blr x13",
-            "ldr x0, [sp]",
-            "add sp, sp, #0x8",
+            "blr x0",
+            "mov x0, #0",
             "ldp x29, x30, [sp]",
             "add sp, sp, #0x10",
             "ret",
@@ -80,13 +77,6 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
     fn handle(&self, emu: &AndroidEmulator<T>) -> SvcCallResult {
         let once_ptr_addr = emu.backend.reg_read(RegisterARM64::X0).unwrap_or(0);
         let init_routine = emu.backend.reg_read(RegisterARM64::X1).unwrap_or(0);
-
-        let ret_slot =
-            VMPointer::new(emu.backend.reg_read(RegisterARM64::SP).unwrap(), 0, emu.backend.clone())
-                .share_with_size(-8, 0);
-        let callback_slot = ret_slot.share_with_size(-8, 0);
-
-        ret_slot.write_u64(0).unwrap();
 
         let callback = if once_ptr_addr == 0 || init_routine == 0 {
             0
@@ -129,12 +119,7 @@ impl<T: Clone> Arm64Svc<T> for PthreadOnceSvc {
                 0
             }
         };
-
-        callback_slot.write_u64(callback).unwrap();
-        emu.backend
-            .reg_write(RegisterARM64::SP, callback_slot.addr)
-            .unwrap();
-        SvcCallResult::RET(0)
+        SvcCallResult::RET(callback as i64)
     }
 }
 
