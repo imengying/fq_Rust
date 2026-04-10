@@ -68,6 +68,9 @@
 - `FQRS_DEVICE_POOL_STARTUP_NAME`
 - `FQRS_UPSTREAM_DROP_HEADERS`
 - `FQRS_UPSTREAM_DROP_QUERY_PARAMS`
+- `FQRS_COOKIE_OVERRIDE`
+- `FQRS_USER_AGENT_OVERRIDE`
+- `FQRS_DEVICE_JSON_OVERRIDE`
 - `FQ_SIGNER_RESOURCE_ROOT`
 - `RNIDBG_BASE_PATH`
 
@@ -150,6 +153,21 @@ FQRS_UPSTREAM_DROP_QUERY_PARAMS=need_version,book_type,player_so_load ./target/r
 
 - 这个变量同样是逗号分隔、大小写不敏感
 - 它会在 signer 计算签名前先修改最终 URL，所以签名和实际请求保持一致
+
+如果你要做设备画像 / 区域 A/B 实验，可以直接用环境变量覆盖当前生效设备和设备池里的所有 profile：
+
+```bash
+FQRS_COOKIE_OVERRIDE='install_id=573270579220059' ./target/release/fq-api
+FQRS_USER_AGENT_OVERRIDE='com.dragon.read.oversea.gp/68132 (Linux; U; Android 13; zh_CN; Pixel 7; Build/TQ3A.230805.001;tt-ok/3.12.13.4-tiktok)' ./target/release/fq-api
+FQRS_DEVICE_JSON_OVERRIDE='{"device":{"cdid":"override-cdid","device_type":"Pixel 7","device_brand":"Google","rom_version":"TQ3A.230805.001","device_id":"1778337441136410","install_id":"573270579220059"}}' ./target/release/fq-api
+```
+
+说明：
+
+- `FQRS_COOKIE_OVERRIDE` 直接替换 `cookie`
+- `FQRS_USER_AGENT_OVERRIDE` 直接替换 `user-agent`
+- `FQRS_DEVICE_JSON_OVERRIDE` 用 JSON 做局部覆盖，未提供的字段保持原配置
+- 这 3 个 override 会同时作用到当前 profile 和设备池里的 profile，避免轮换后实验失效
 
 ## 实验导入外部运行时
 

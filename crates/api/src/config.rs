@@ -116,6 +116,35 @@ pub struct UpstreamDevice {
     pub os_api: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct DeviceProfileOverride {
+    pub name: Option<String>,
+    pub user_agent: Option<String>,
+    pub cookie: Option<String>,
+    pub device: Option<UpstreamDeviceOverride>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct UpstreamDeviceOverride {
+    pub aid: Option<String>,
+    pub cdid: Option<String>,
+    pub device_id: Option<String>,
+    pub device_type: Option<String>,
+    pub device_brand: Option<String>,
+    pub install_id: Option<String>,
+    pub resolution: Option<String>,
+    pub dpi: Option<String>,
+    pub rom_version: Option<String>,
+    pub host_abi: Option<String>,
+    pub update_version_code: Option<String>,
+    pub version_code: Option<String>,
+    pub version_name: Option<String>,
+    pub os_version: Option<String>,
+    pub os_api: Option<String>,
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -255,6 +284,7 @@ impl AppConfig {
         let mut config = load_from_disk()?;
         config.apply_env();
         config.inherit_device_pool_defaults();
+        config.apply_profile_overrides_from_env()?;
         config.validate()?;
         Ok(config)
     }
@@ -356,6 +386,18 @@ impl AppConfig {
 
         self.fq.device_profile.inherit_missing_from(&bootstrap);
     }
+
+    fn apply_profile_overrides_from_env(&mut self) -> Result<()> {
+        let cookie_override = string_override_from_env("FQRS_COOKIE_OVERRIDE");
+        let user_agent_override = string_override_from_env("FQRS_USER_AGENT_OVERRIDE");
+        let device_override = parse_device_profile_override_from_env("FQRS_DEVICE_JSON_OVERRIDE")?;
+        self.fq.apply_profile_overrides(
+            cookie_override.as_deref(),
+            user_agent_override.as_deref(),
+            device_override.as_ref(),
+        );
+        Ok(())
+    }
 }
 
 impl UpstreamConfig {
@@ -393,6 +435,18 @@ impl FqConfig {
 
         self.device_pool.first()
     }
+
+    fn apply_profile_overrides(
+        &mut self,
+        cookie_override: Option<&str>,
+        user_agent_override: Option<&str>,
+        device_override: Option<&DeviceProfileOverride>,
+    ) {
+        self.device_profile.apply_overrides(cookie_override, user_agent_override, device_override);
+        for profile in &mut self.device_pool {
+            profile.apply_overrides(cookie_override, user_agent_override, device_override);
+        }
+    }
 }
 
 impl DeviceProfile {
@@ -401,6 +455,23 @@ impl DeviceProfile {
         inherit_string(&mut self.user_agent, &fallback.user_agent);
         inherit_string(&mut self.cookie, &fallback.cookie);
         self.device.inherit_missing_from(&fallback.device);
+    }
+
+    fn apply_overrides(
+        &mut self,
+        cookie_override: Option<&str>,
+        user_agent_override: Option<&str>,
+        device_override: Option<&DeviceProfileOverride>,
+    ) {
+        if let Some(cookie_override) = cookie_override {
+            self.cookie = cookie_override.to_string();
+        }
+        if let Some(user_agent_override) = user_agent_override {
+            self.user_agent = user_agent_override.to_string();
+        }
+        if let Some(device_override) = device_override {
+            device_override.apply_to_profile(self);
+        }
     }
 }
 
@@ -524,5 +595,128 @@ fn set_bool(target: &mut bool, key: &str) {
             "0" | "false" | "no" | "off" => *target = false,
             _ => {}
         }
+    }
+}
+
+fn string_override_from_env(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_device_profile_override_from_env(key: &str) -> Result<Option<DeviceProfileOverride>> {
+    let Some(raw) = string_override_from_env(key) else {
+        return Ok(None);
+    };
+    let parsed = serde_json::from_str(&raw)
+        .map_err(|error| anyhow!("{key} JSON 解析失败: {error}"))?;
+    Ok(Some(parsed))
+}
+
+impl DeviceProfileOverride {
+    fn apply_to_profile(&self, profile: &mut DeviceProfile) {
+        apply_override_string(&mut profile.name, self.name.as_deref());
+        apply_override_string(&mut profile.user_agent, self.user_agent.as_deref());
+        apply_override_string(&mut profile.cookie, self.cookie.as_deref());
+        if let Some(device_override) = &self.device {
+            device_override.apply_to_device(&mut profile.device);
+        }
+    }
+}
+
+impl UpstreamDeviceOverride {
+    fn apply_to_device(&self, device: &mut UpstreamDevice) {
+        apply_override_string(&mut device.aid, self.aid.as_deref());
+        apply_override_string(&mut device.cdid, self.cdid.as_deref());
+        apply_override_string(&mut device.device_id, self.device_id.as_deref());
+        apply_override_string(&mut device.device_type, self.device_type.as_deref());
+        apply_override_string(&mut device.device_brand, self.device_brand.as_deref());
+        apply_override_string(&mut device.install_id, self.install_id.as_deref());
+        apply_override_string(&mut device.resolution, self.resolution.as_deref());
+        apply_override_string(&mut device.dpi, self.dpi.as_deref());
+        apply_override_string(&mut device.rom_version, self.rom_version.as_deref());
+        apply_override_string(&mut device.host_abi, self.host_abi.as_deref());
+        apply_override_string(
+            &mut device.update_version_code,
+            self.update_version_code.as_deref(),
+        );
+        apply_override_string(&mut device.version_code, self.version_code.as_deref());
+        apply_override_string(&mut device.version_name, self.version_name.as_deref());
+        apply_override_string(&mut device.os_version, self.os_version.as_deref());
+        apply_override_string(&mut device.os_api, self.os_api.as_deref());
+    }
+}
+
+fn apply_override_string(target: &mut String, override_value: Option<&str>) {
+    if let Some(override_value) = override_value.map(str::trim).filter(|value| !value.is_empty()) {
+        *target = override_value.to_string();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_profile_override_updates_cookie_user_agent_and_device() {
+        let mut profile = DeviceProfile::default();
+        profile.name = "dev01".to_string();
+
+        let override_value = DeviceProfileOverride {
+            name: Some("override-dev".to_string()),
+            user_agent: Some("override-ua".to_string()),
+            cookie: Some("install_id=2".to_string()),
+            device: Some(UpstreamDeviceOverride {
+                device_id: Some("device-override".to_string()),
+                cdid: Some("cdid-override".to_string()),
+                ..UpstreamDeviceOverride::default()
+            }),
+        };
+
+        profile.apply_overrides(Some("cookie-override"), Some("ua-override"), Some(&override_value));
+
+        assert_eq!(profile.name, "override-dev");
+        assert_eq!(profile.user_agent, "override-ua");
+        assert_eq!(profile.cookie, "install_id=2");
+        assert_eq!(profile.device.device_id, "device-override");
+        assert_eq!(profile.device.cdid, "cdid-override");
+    }
+
+    #[test]
+    fn fq_config_applies_overrides_to_pool_profiles() {
+        let mut config = FqConfig::default();
+        config.device_profile.name = "active".to_string();
+        config.device_pool = vec![
+            DeviceProfile {
+                name: "dev01".to_string(),
+                ..DeviceProfile::default()
+            },
+            DeviceProfile {
+                name: "dev02".to_string(),
+                ..DeviceProfile::default()
+            },
+        ];
+
+        let override_value = DeviceProfileOverride {
+            device: Some(UpstreamDeviceOverride {
+                install_id: Some("override-install".to_string()),
+                ..UpstreamDeviceOverride::default()
+            }),
+            ..DeviceProfileOverride::default()
+        };
+
+        config.apply_profile_overrides(
+            Some("cookie-override"),
+            Some("ua-override"),
+            Some(&override_value),
+        );
+
+        assert_eq!(config.device_profile.cookie, "cookie-override");
+        assert_eq!(config.device_profile.user_agent, "ua-override");
+        assert_eq!(config.device_profile.device.install_id, "override-install");
+        assert_eq!(config.device_pool[0].cookie, "cookie-override");
+        assert_eq!(config.device_pool[1].user_agent, "ua-override");
+        assert_eq!(config.device_pool[1].device.install_id, "override-install");
     }
 }
