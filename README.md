@@ -66,6 +66,7 @@
 - `DB_URL`
 - `FQRS_SIGNER_ANDROID_SDK_API`
 - `FQRS_DEVICE_POOL_STARTUP_NAME`
+- `FQRS_UPSTREAM_DROP_HEADERS`
 - `FQ_SIGNER_RESOURCE_ROOT`
 - `RNIDBG_BASE_PATH`
 
@@ -122,6 +123,20 @@ curl "http://127.0.0.1:9999/book/7185502456775208503"
 curl "http://127.0.0.1:9999/toc/7185502456775208503"
 curl "http://127.0.0.1:9999/chapter/7185502456775208503/7185502456775209001"
 ```
+
+如果你要做上游请求头 A/B 实验，可以临时裁掉最终发出的部分请求头：
+
+```bash
+FQRS_UPSTREAM_DROP_HEADERS=x-soter ./target/release/fq-api
+FQRS_UPSTREAM_DROP_HEADERS=x-medusa,x-soter ./target/release/fq-api
+FQRS_UPSTREAM_DROP_HEADERS=authorization,x-soter ./target/release/fq-api
+```
+
+说明：
+
+- 这个变量是逗号分隔、大小写不敏感
+- 它作用在最终发出的上游请求头，不改 signer 原始输出格式
+- 适合快速排查 `HTTP 200` 但 `body` 为空时，究竟是哪组头触发了上游策略
 
 ## 实验导入外部运行时
 

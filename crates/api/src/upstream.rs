@@ -11,6 +11,7 @@ use crate::registerkey::RegisterKeyResolveResult;
 use crate::state::AppState;
 use indexmap::IndexMap;
 use rand::RngExt;
+use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -517,6 +518,14 @@ async fn execute_signed_json_get(
 ) -> ServiceResult<Value> {
     let sign = state.signer_client.sign(url, &headers).await?;
     let merged_headers = merge_headers(&headers, &sign.headers)?;
+    let (merged_headers, dropped_headers) = apply_upstream_header_filter(merged_headers);
+    if !dropped_headers.is_empty() {
+        warn!(
+            "upstream header filter active: dropped=[{}], url={}",
+            dropped_headers.join(", "),
+            url
+        );
+    }
     let attempt =
         execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
     let attempt = if attempt.body_text.trim().is_empty() {
@@ -639,7 +648,7 @@ async fn cache_chapter(state: &AppState, chapter: &ChapterInfo) {
 async fn execute_signed_json_get_once(
     client: &reqwest::Client,
     url: &str,
-    headers: reqwest::header::HeaderMap,
+    headers: HeaderMap,
 ) -> ServiceResult<UpstreamHttpResponse> {
     // Build request first so we can inspect what reqwest will actually send
     let request = client
@@ -720,6 +729,62 @@ async fn execute_signed_json_get_once(
         body_len: body.len(),
         body_text,
     })
+}
+
+fn apply_upstream_header_filter(headers: HeaderMap) -> (HeaderMap, Vec<String>) {
+    let drop_headers = parse_header_name_list(
+        &std::env::var("FQRS_UPSTREAM_DROP_HEADERS").unwrap_or_default(),
+    );
+    apply_upstream_header_filter_with_list(headers, &drop_headers)
+}
+
+fn apply_upstream_header_filter_with_list(
+    headers: HeaderMap,
+    drop_headers: &[String],
+) -> (HeaderMap, Vec<String>) {
+    if drop_headers.is_empty() {
+        return (headers, Vec::new());
+    }
+
+    let mut filtered = HeaderMap::new();
+    let mut dropped = Vec::new();
+    for (name, value) in &headers {
+        if should_drop_header_name(name.as_str(), drop_headers) {
+            if !dropped
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(name.as_str()))
+            {
+                dropped.push(name.to_string());
+            }
+            continue;
+        }
+        filtered.insert(name.clone(), value.clone());
+    }
+    (filtered, dropped)
+}
+
+fn parse_header_name_list(value: &str) -> Vec<String> {
+    let mut parsed = Vec::new();
+    for item in value.split(',') {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if parsed
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(trimmed))
+        {
+            continue;
+        }
+        parsed.push(trimmed.to_ascii_lowercase());
+    }
+    parsed
+}
+
+fn should_drop_header_name(name: &str, drop_headers: &[String]) -> bool {
+    drop_headers
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }
 
 fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
@@ -1551,5 +1616,32 @@ mod tests {
 
         let key = compute_prefetch_key("book1", &directory, "5", 3);
         assert_eq!(key, "book1:bucket:3:3");
+    }
+
+    #[test]
+    fn parses_header_drop_list() {
+        let parsed = parse_header_name_list(" X-SOTER , x-medusa,authorization, x-soter ");
+        assert_eq!(parsed, vec!["x-soter", "x-medusa", "authorization"]);
+    }
+
+    #[test]
+    fn filters_request_headers_case_insensitively() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-soter", "1".parse().unwrap());
+        headers.insert("x-gorgon", "2".parse().unwrap());
+        headers.insert("authorization", "Bearer".parse().unwrap());
+
+        let (filtered, dropped) = apply_upstream_header_filter_with_list(
+            headers,
+            &parse_header_name_list("X-SOTER, Authorization"),
+        );
+
+        assert!(filtered.get("x-soter").is_none());
+        assert!(filtered.get("authorization").is_none());
+        assert_eq!(
+            filtered.get("x-gorgon").and_then(|value| value.to_str().ok()),
+            Some("2")
+        );
+        assert_eq!(dropped, vec!["x-soter", "authorization"]);
     }
 }
