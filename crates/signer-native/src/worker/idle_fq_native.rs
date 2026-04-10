@@ -273,6 +273,14 @@ impl Jni<()> for FqJni {
             return value.into_bytes().into();
         }
 
+        if class_name == "java/lang/Thread"
+            && method.name == "getBytes"
+            && method.signature == "(Ljava/lang/String;)[B"
+        {
+            let value = args.get::<String>(vm);
+            return value.into_bytes().into();
+        }
+
         if class_name == "java/lang/StackTraceElement" && method.name == "getClassName" {
             if let Some(ref instance) = instance {
                 if let Some(element) = stack_trace_element(instance) {
@@ -415,12 +423,28 @@ fn build_stack_trace_array(classes: &CachedClasses) -> DvmObject {
             method_name: "getStackTrace".to_string(),
         },
         StackTraceElementData {
+            class_name: "com.github.unidbg.linux.android.dvm.AbstractJni".to_string(),
+            method_name: "callObjectMethodV".to_string(),
+        },
+        StackTraceElementData {
+            class_name: "com.github.unidbg.linux.android.dvm.DvmMethod".to_string(),
+            method_name: "callObjectMethodV".to_string(),
+        },
+        StackTraceElementData {
             class_name: "com.bytedance.mobsec.metasec.ml.MS".to_string(),
             method_name: "b".to_string(),
         },
         StackTraceElementData {
-            class_name: "com.dragon.read.oversea.gp".to_string(),
-            method_name: "sign".to_string(),
+            class_name: "com.mengying.fqnovel.unidbg.IdleFQ".to_string(),
+            method_name: "generateSignature".to_string(),
+        },
+        StackTraceElementData {
+            class_name: "com.mengying.fqnovel.SignerWorker".to_string(),
+            method_name: "handle".to_string(),
+        },
+        StackTraceElementData {
+            class_name: "com.mengying.fqnovel.SignerWorker".to_string(),
+            method_name: "main".to_string(),
         },
     ];
 
