@@ -94,6 +94,20 @@ cargo build --release --workspace
 ./start.sh build
 ```
 
+脚本在 root 环境下默认会把 Rust 安装到系统目录：
+
+```bash
+CARGO_HOME=/usr/local/cargo
+RUSTUP_HOME=/usr/local/rustup
+```
+
+并自动写入 `/usr/local/bin` 链接和 `/etc/profile.d/fq-rust-env.sh`。
+如果你明确不想装到系统目录，可以显式传：
+
+```bash
+SYSTEM_RUST_INSTALL=false ./start.sh build
+```
+
 3. 启动：
 
 ```bash

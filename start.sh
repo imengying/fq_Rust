@@ -31,8 +31,21 @@ RUN_BIN="${PROJECT_DIR}/target/release/fq-api"
 CONFIG_PATH="${PROJECT_DIR}/configs/config.yaml"
 
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-stable}"
-CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+SYSTEM_RUST_INSTALL="${SYSTEM_RUST_INSTALL:-auto}"
+if [[ -z "${CARGO_HOME:-}" ]]; then
+  if [[ "$(id -u)" -eq 0 && "${SYSTEM_RUST_INSTALL}" != "false" ]]; then
+    CARGO_HOME="/usr/local/cargo"
+  else
+    CARGO_HOME="$HOME/.cargo"
+  fi
+fi
+if [[ -z "${RUSTUP_HOME:-}" ]]; then
+  if [[ "$(id -u)" -eq 0 && "${SYSTEM_RUST_INSTALL}" != "false" ]]; then
+    RUSTUP_HOME="/usr/local/rustup"
+  else
+    RUSTUP_HOME="$HOME/.rustup"
+  fi
+fi
 RUSTUP_DIST_SERVER="${RUSTUP_DIST_SERVER:-https://mirrors.aliyun.com/rustup}"
 RUSTUP_UPDATE_ROOT="${RUSTUP_UPDATE_ROOT:-https://mirrors.aliyun.com/rustup/rustup}"
 RUSTUP_INIT_URL="${RUSTUP_INIT_URL:-https://mirrors.aliyun.com/repo/rust/rustup-init.sh}"
@@ -57,6 +70,37 @@ else
 fi
 
 APT_UPDATED=0
+
+install_system_rust_links() {
+  if [[ "${CARGO_HOME}" != /usr/local/* ]]; then
+    return
+  fi
+
+  mkdir -p /usr/local/bin
+  local bin
+  for bin in cargo cargo-clippy cargo-fmt rustc rustdoc rustfmt rustup; do
+    if [[ -x "${CARGO_HOME}/bin/${bin}" ]]; then
+      ln -sf "${CARGO_HOME}/bin/${bin}" "/usr/local/bin/${bin}"
+    fi
+  done
+}
+
+install_system_rust_env() {
+  if [[ "${CARGO_HOME}" != /usr/local/* ]]; then
+    return
+  fi
+
+  mkdir -p /etc/profile.d
+  cat > /etc/profile.d/fq-rust-env.sh <<EOF
+export CARGO_HOME="${CARGO_HOME}"
+export RUSTUP_HOME="${RUSTUP_HOME}"
+case ":\$PATH:" in
+  *:"${CARGO_HOME}/bin":*) ;;
+  *) export PATH="${CARGO_HOME}/bin:\$PATH" ;;
+esac
+EOF
+  chmod 0644 /etc/profile.d/fq-rust-env.sh
+}
 
 ensure_apt_packages() {
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -85,29 +129,36 @@ ensure_apt_packages() {
 
 ensure_rust() {
   export CARGO_HOME RUSTUP_HOME
-  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export PATH="/usr/local/bin:${CARGO_HOME}/bin:${PATH}"
   export RUSTUP_DIST_SERVER
   export RUSTUP_UPDATE_ROOT
   export CARGO_NET_GIT_FETCH_WITH_CLI
 
-  if ! command -v rustup >/dev/null 2>&1; then
+  mkdir -p "${CARGO_HOME}" "${RUSTUP_HOME}"
+
+  if [[ ! -x "${CARGO_HOME}/bin/rustup" ]]; then
     log "安装 rustup"
-    curl --proto '=https' --tlsv1.2 -sSf "${RUSTUP_INIT_URL}" | sh -s -- -y --profile minimal --default-toolchain none
-    export PATH="${CARGO_HOME}/bin:${PATH}"
+    curl --proto '=https' --tlsv1.2 -sSf "${RUSTUP_INIT_URL}" | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
   fi
 
-  if ! rustup run "${RUST_TOOLCHAIN}" rustc --version >/dev/null 2>&1; then
+  install_system_rust_links
+  install_system_rust_env
+
+  if ! "${CARGO_HOME}/bin/rustup" run "${RUST_TOOLCHAIN}" rustc --version >/dev/null 2>&1; then
     log "安装 Rust toolchain ${RUST_TOOLCHAIN}"
-    rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal
+    "${CARGO_HOME}/bin/rustup" toolchain install "${RUST_TOOLCHAIN}" --profile minimal
   fi
 
-  if ! rustup component list --toolchain "${RUST_TOOLCHAIN}" | grep -q '^rustfmt-.*(installed)$'; then
+  if ! "${CARGO_HOME}/bin/rustup" component list --toolchain "${RUST_TOOLCHAIN}" | grep -q '^rustfmt-.*(installed)$'; then
     log "安装 rustfmt 组件"
-    rustup component add rustfmt --toolchain "${RUST_TOOLCHAIN}"
+    "${CARGO_HOME}/bin/rustup" component add rustfmt --toolchain "${RUST_TOOLCHAIN}"
   fi
 
-  rustup default "${RUST_TOOLCHAIN}" >/dev/null
-  log "使用 Rust: $(rustup run "${RUST_TOOLCHAIN}" rustc --version)"
+  "${CARGO_HOME}/bin/rustup" default "${RUST_TOOLCHAIN}" >/dev/null
+  install_system_rust_links
+  install_system_rust_env
+  log "使用 Rust: $("${CARGO_HOME}/bin/rustup" run "${RUST_TOOLCHAIN}" rustc --version)"
+  log "Rust 安装目录: CARGO_HOME=${CARGO_HOME}, RUSTUP_HOME=${RUSTUP_HOME}"
 }
 
 cargo_cmd() {
@@ -124,7 +175,7 @@ install_deps() {
 
 build_project() {
   cd "${PROJECT_DIR}"
-  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export PATH="/usr/local/bin:${CARGO_HOME}/bin:${PATH}"
   export RUSTUP_DIST_SERVER
   export RUSTUP_UPDATE_ROOT
   export CARGO_NET_GIT_FETCH_WITH_CLI
@@ -141,7 +192,7 @@ build_project() {
 
 test_project() {
   cd "${PROJECT_DIR}"
-  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export PATH="/usr/local/bin:${CARGO_HOME}/bin:${PATH}"
   export RUSTUP_DIST_SERVER
   export RUSTUP_UPDATE_ROOT
   export CARGO_NET_GIT_FETCH_WITH_CLI
@@ -156,7 +207,7 @@ test_project() {
 
 run_project() {
   cd "${PROJECT_DIR}"
-  export PATH="${CARGO_HOME}/bin:${PATH}"
+  export PATH="/usr/local/bin:${CARGO_HOME}/bin:${PATH}"
   export RUST_LOG
   unset RNIDBG_BASE_PATH
   unset FQ_SIGNER_RESOURCE_ROOT
