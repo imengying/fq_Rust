@@ -147,15 +147,13 @@ pub fn normalize_install_id(cookie: &str, install_id: &str) -> String {
 
 pub fn build_common_headers(device: &DeviceProfile) -> IndexMap<String, String> {
     let now = now_ms();
+    let normalized_cookie = normalize_install_id(&device.cookie, &device.device.install_id);
     let mut headers = IndexMap::new();
     headers.insert(
         "accept".to_string(),
         "application/json; charset=utf-8,application/x-protobuf".to_string(),
     );
-    headers.insert(
-        "cookie".to_string(),
-        normalize_install_id(&device.cookie, &device.device.install_id),
-    );
+    headers.insert("cookie".to_string(), normalized_cookie.clone());
     headers.insert("user-agent".to_string(), device.user_agent.clone());
     headers.insert("accept-encoding".to_string(), "gzip".to_string());
     headers.insert("x-xs-from-web".to_string(), "0".to_string());
@@ -168,13 +166,34 @@ pub fn build_common_headers(device: &DeviceProfile) -> IndexMap<String, String> 
         format!("{}-{}", now, rand::rng().random_range(1..2_000_000_000u32)),
     );
     headers.insert("sdk-version".to_string(), "2".to_string());
-    headers.insert("x-tt-store-region-src".to_string(), "did".to_string());
-    headers.insert("x-tt-store-region".to_string(), "cn-zj".to_string());
+    if let Some(store_region_src) = cookie_value(&normalized_cookie, "store-region-src") {
+        headers.insert("x-tt-store-region-src".to_string(), store_region_src);
+    }
+    if let Some(store_region) = cookie_value(&normalized_cookie, "store-region") {
+        headers.insert("x-tt-store-region".to_string(), store_region);
+    }
     headers.insert("lc".to_string(), "101".to_string());
     headers.insert("x-ss-req-ticket".to_string(), now.to_string());
     headers.insert("passport-sdk-version".to_string(), "50564".to_string());
     headers.insert("x-ss-dp".to_string(), device.device.aid.clone());
     headers
+}
+
+fn cookie_value(cookie: &str, key: &str) -> Option<String> {
+    for pair in cookie.split(';') {
+        let trimmed = pair.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let (pair_key, pair_value) = trimmed.split_once('=')?;
+        if pair_key.trim().eq_ignore_ascii_case(key) {
+            let value = pair_value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub fn build_common_params(device: &DeviceProfile) -> Vec<(String, String)> {
@@ -253,6 +272,34 @@ mod tests {
         assert_eq!(
             normalize_install_id(cookie, "123"),
             "store-region=cn-zj; store-region-src=did; install_id=123;"
+        );
+    }
+
+    #[test]
+    fn extracts_cookie_values_case_insensitively() {
+        let cookie = "store-region=us; STORE-REGION-SRC=did; install_id=123";
+        assert_eq!(cookie_value(cookie, "store-region").as_deref(), Some("us"));
+        assert_eq!(
+            cookie_value(cookie, "x").as_deref(),
+            None
+        );
+        assert_eq!(
+            cookie_value(cookie, "store-region-src").as_deref(),
+            Some("did")
+        );
+    }
+
+    #[test]
+    fn build_common_headers_uses_cookie_region_headers() {
+        let mut device = DeviceProfile::default();
+        device.cookie = "store-region=us; store-region-src=did; install_id=1".to_string();
+
+        let headers = build_common_headers(&device);
+
+        assert_eq!(headers.get("x-tt-store-region").map(String::as_str), Some("us"));
+        assert_eq!(
+            headers.get("x-tt-store-region-src").map(String::as_str),
+            Some("did")
         );
     }
 }
