@@ -67,6 +67,7 @@
 - `FQRS_SIGNER_ANDROID_SDK_API`
 - `FQRS_DEVICE_POOL_STARTUP_NAME`
 - `FQRS_UPSTREAM_DROP_HEADERS`
+- `FQRS_UPSTREAM_DROP_QUERY_PARAMS`
 - `FQ_SIGNER_RESOURCE_ROOT`
 - `RNIDBG_BASE_PATH`
 
@@ -137,6 +138,18 @@ FQRS_UPSTREAM_DROP_HEADERS=authorization,x-soter ./target/release/fq-api
 - 这个变量是逗号分隔、大小写不敏感
 - 它作用在最终发出的上游请求头，不改 signer 原始输出格式
 - 适合快速排查 `HTTP 200` 但 `body` 为空时，究竟是哪组头触发了上游策略
+
+如果你要做上游 query 参数 A/B 实验，也可以临时裁掉最终请求 URL 里的部分参数：
+
+```bash
+FQRS_UPSTREAM_DROP_QUERY_PARAMS=need_version ./target/release/fq-api
+FQRS_UPSTREAM_DROP_QUERY_PARAMS=need_version,book_type,player_so_load ./target/release/fq-api
+```
+
+说明：
+
+- 这个变量同样是逗号分隔、大小写不敏感
+- 它会在 signer 计算签名前先修改最终 URL，所以签名和实际请求保持一致
 
 ## 实验导入外部运行时
 

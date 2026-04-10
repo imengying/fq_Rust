@@ -12,6 +12,7 @@ use crate::state::AppState;
 use indexmap::IndexMap;
 use rand::RngExt;
 use reqwest::header::HeaderMap;
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -516,18 +517,27 @@ async fn execute_signed_json_get(
     url: &str,
     headers: IndexMap<String, String>,
 ) -> ServiceResult<Value> {
-    let sign = state.signer_client.sign(url, &headers).await?;
+    let (effective_url, dropped_query_params) = apply_upstream_query_filter(url)?;
+    if !dropped_query_params.is_empty() {
+        warn!(
+            "upstream query filter active: dropped=[{}], url={}",
+            dropped_query_params.join(", "),
+            effective_url
+        );
+    }
+    let sign = state.signer_client.sign(&effective_url, &headers).await?;
     let merged_headers = merge_headers(&headers, &sign.headers)?;
     let (merged_headers, dropped_headers) = apply_upstream_header_filter(merged_headers);
     if !dropped_headers.is_empty() {
         warn!(
             "upstream header filter active: dropped=[{}], url={}",
             dropped_headers.join(", "),
-            url
+            effective_url
         );
     }
     let attempt =
-        execute_signed_json_get_once(&state.http_client, url, merged_headers.clone()).await?;
+        execute_signed_json_get_once(&state.http_client, &effective_url, merged_headers.clone())
+            .await?;
     let attempt = if attempt.body_text.trim().is_empty() {
         warn!(
             "upstream returned empty body, retrying over http1: status={}, content_length={}, content_type={}, content_encoding={:?}, url={}",
@@ -537,7 +547,8 @@ async fn execute_signed_json_get(
             attempt.content_encoding,
             attempt.response_url
         );
-        execute_signed_json_get_once(&state.http_client_fallback, url, merged_headers).await?
+        execute_signed_json_get_once(&state.http_client_fallback, &effective_url, merged_headers)
+            .await?
     } else {
         attempt
     };
@@ -732,7 +743,7 @@ async fn execute_signed_json_get_once(
 }
 
 fn apply_upstream_header_filter(headers: HeaderMap) -> (HeaderMap, Vec<String>) {
-    let drop_headers = parse_header_name_list(
+    let drop_headers = parse_drop_name_list(
         &std::env::var("FQRS_UPSTREAM_DROP_HEADERS").unwrap_or_default(),
     );
     apply_upstream_header_filter_with_list(headers, &drop_headers)
@@ -763,7 +774,7 @@ fn apply_upstream_header_filter_with_list(
     (filtered, dropped)
 }
 
-fn parse_header_name_list(value: &str) -> Vec<String> {
+fn parse_drop_name_list(value: &str) -> Vec<String> {
     let mut parsed = Vec::new();
     for item in value.split(',') {
         let trimmed = item.trim();
@@ -785,6 +796,42 @@ fn should_drop_header_name(name: &str, drop_headers: &[String]) -> bool {
     drop_headers
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+fn apply_upstream_query_filter(url: &str) -> ServiceResult<(String, Vec<String>)> {
+    let drop_params =
+        parse_drop_name_list(&std::env::var("FQRS_UPSTREAM_DROP_QUERY_PARAMS").unwrap_or_default());
+    if drop_params.is_empty() {
+        return Ok((url.to_string(), Vec::new()));
+    }
+
+    let mut parsed =
+        Url::parse(url).map_err(|error| ServiceError::internal(format!("上游 URL 解析失败: {error}")))?;
+    let original_pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+
+    let mut dropped = Vec::new();
+    let mut kept = Vec::with_capacity(original_pairs.len());
+    for (key, value) in original_pairs {
+        if should_drop_header_name(&key, &drop_params) {
+            if !dropped
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&key))
+            {
+                dropped.push(key);
+            }
+            continue;
+        }
+        kept.push((key, value));
+    }
+
+    parsed.query_pairs_mut().clear().extend_pairs(
+        kept.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
+    Ok((parsed.into(), dropped))
 }
 
 fn build_search_headers(device: &DeviceProfile) -> IndexMap<String, String> {
@@ -1620,7 +1667,7 @@ mod tests {
 
     #[test]
     fn parses_header_drop_list() {
-        let parsed = parse_header_name_list(" X-SOTER , x-medusa,authorization, x-soter ");
+        let parsed = parse_drop_name_list(" X-SOTER , x-medusa,authorization, x-soter ");
         assert_eq!(parsed, vec!["x-soter", "x-medusa", "authorization"]);
     }
 
@@ -1633,7 +1680,7 @@ mod tests {
 
         let (filtered, dropped) = apply_upstream_header_filter_with_list(
             headers,
-            &parse_header_name_list("X-SOTER, Authorization"),
+            &parse_drop_name_list("X-SOTER, Authorization"),
         );
 
         assert!(filtered.get("x-soter").is_none());
@@ -1643,5 +1690,52 @@ mod tests {
             Some("2")
         );
         assert_eq!(dropped, vec!["x-soter", "authorization"]);
+    }
+
+    #[test]
+    fn filters_query_params_case_insensitively() {
+        let (filtered, dropped) = apply_upstream_query_filter_with_list_for_test(
+            "https://example.com/path?a=1&need_version=true&book_type=0&b=2",
+            &parse_drop_name_list("NEED_VERSION, book_type"),
+        )
+        .unwrap();
+
+        assert_eq!(filtered, "https://example.com/path?a=1&b=2");
+        assert_eq!(dropped, vec!["need_version", "book_type"]);
+    }
+
+    fn apply_upstream_query_filter_with_list_for_test(
+        url: &str,
+        drop_params: &[String],
+    ) -> ServiceResult<(String, Vec<String>)> {
+        if drop_params.is_empty() {
+            return Ok((url.to_string(), Vec::new()));
+        }
+
+        let mut parsed = Url::parse(url)
+            .map_err(|error| ServiceError::internal(format!("上游 URL 解析失败: {error}")))?;
+        let original_pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        let mut dropped = Vec::new();
+        let mut kept = Vec::with_capacity(original_pairs.len());
+        for (key, value) in original_pairs {
+            if should_drop_header_name(&key, drop_params) {
+                if !dropped
+                    .iter()
+                    .any(|existing: &String| existing.eq_ignore_ascii_case(&key))
+                {
+                    dropped.push(key);
+                }
+                continue;
+            }
+            kept.push((key, value));
+        }
+        parsed.query_pairs_mut().clear().extend_pairs(
+            kept.iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+        Ok((parsed.into(), dropped))
     }
 }
