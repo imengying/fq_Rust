@@ -53,6 +53,11 @@ const MS_METHOD_NOW_MS: i32 = 268435470;
 
 const PID: u32 = 2667;
 const PPID: u32 = 2427;
+const INODE_DATA_SYSTEM: u64 = 671745;
+const INODE_DATA_APP: u64 = 327681;
+const INODE_SDCARD_ANDROID: u64 = 294915;
+const INODE_DATA_USER_DIR: u64 = 655781;
+const INODE_DATA_FILES_DIR: u64 = 655864;
 
 static LOADER_SHARED_GLOBALS_ADDR: AtomicU64 = AtomicU64::new(0);
 
@@ -102,6 +107,7 @@ impl IdleFqNative {
         std::env::set_var("BASE_PATH", rnidbg_base_path);
 
         let mut emulator = AndroidEmulator::create_arm64(PID, PPID, PACKAGE_NAME, ());
+        emulator.set_process_uid(APP_UID);
         register_libc_hooks(&mut emulator, android_sdk_api);
         register_virtual_modules(&mut emulator);
         install_file_resolver(&mut emulator, &resources);
@@ -865,12 +871,49 @@ fn install_file_resolver(emulator: &mut AndroidEmulator<'static, ()>, resources:
             }
 
             if path == "/data/system"
-                || path == "/data/app"
-                || path == "/sdcard/android"
-                || path == DATA_USER_DIR
-                || path == DATA_FILES_DIR
             {
-                return Some(FileIO::Direction(Direction::new(VecDeque::new(), path)));
+                return Some(FileIO::Direction(Direction::new_with_metadata(
+                    VecDeque::new(),
+                    path,
+                    0,
+                    INODE_DATA_SYSTEM,
+                )));
+            }
+
+            if path == "/data/app" {
+                return Some(FileIO::Direction(Direction::new_with_metadata(
+                    VecDeque::new(),
+                    path,
+                    0,
+                    INODE_DATA_APP,
+                )));
+            }
+
+            if path == "/sdcard/android" {
+                return Some(FileIO::Direction(Direction::new_with_metadata(
+                    VecDeque::new(),
+                    path,
+                    0,
+                    INODE_SDCARD_ANDROID,
+                )));
+            }
+
+            if path == DATA_USER_DIR {
+                return Some(FileIO::Direction(Direction::new_with_metadata(
+                    VecDeque::new(),
+                    path,
+                    APP_UID,
+                    INODE_DATA_USER_DIR,
+                )));
+            }
+
+            if path == DATA_FILES_DIR {
+                return Some(FileIO::Direction(Direction::new_with_metadata(
+                    VecDeque::new(),
+                    path,
+                    APP_UID,
+                    INODE_DATA_FILES_DIR,
+                )));
             }
 
             None

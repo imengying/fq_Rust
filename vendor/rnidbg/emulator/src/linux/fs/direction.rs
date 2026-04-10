@@ -4,6 +4,7 @@ use crate::emulator::VMPointer;
 use crate::linux::file_system::{FileIOTrait, SeekResult, StMode};
 use crate::linux::structs::{Dirent, OFlag};
 use std::collections::VecDeque;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 #[derive(Copy, Clone)]
 pub enum DirentType {
@@ -48,16 +49,29 @@ pub struct Direction {
     pub files: VecDeque<DirectionEntry>,
     pub path: String,
     pub off: usize,
+    pub uid: i32,
+    pub inode: u64,
 }
 
 impl Direction {
     pub fn new(mut files: VecDeque<DirectionEntry>, path: &str) -> Self {
+        Self::new_with_metadata(files, path, 0, hash_path(path))
+    }
+
+    pub fn new_with_metadata(
+        mut files: VecDeque<DirectionEntry>,
+        path: &str,
+        uid: i32,
+        inode: u64,
+    ) -> Self {
         files.push_front(DirectionEntry::new(false, ".."));
         files.push_front(DirectionEntry::new(false, "."));
         Direction {
             files,
             path: path.to_string(),
             off: 1,
+            uid,
+            inode,
         }
     }
 }
@@ -87,7 +101,6 @@ impl<T: Clone> FileIOTrait<T> for Direction {
 
     fn getdents64(&mut self, dirp: VMPointer<T>, size: usize) -> i32 {
         let mut offset = 0;
-        let random = rand::random::<u64>();
 
         self.files.retain(|entry| {
             let data = entry.name.as_bytes();
@@ -100,7 +113,7 @@ impl<T: Clone> FileIOTrait<T> for Direction {
             let dirent_ptr = dirp.share(offset as i64);
             let mut buf = [0u8; size_of::<Dirent>()];
             let dirent = unsafe { &mut *(buf.as_mut_ptr() as *mut Dirent) };
-            dirent.d_ino = random + offset as u64;
+            dirent.d_ino = self.inode + self.off as u64;
             dirent.d_off = self.off as i64;
             dirent.d_reclen = d_reclen as u16;
             dirent.d_type = entry.direction_type as u8;
@@ -126,7 +139,7 @@ impl<T: Clone> FileIOTrait<T> for Direction {
     }
 
     fn uid(&self) -> i32 {
-        0
+        self.uid
     }
 
     fn len(&self) -> usize {
@@ -136,4 +149,14 @@ impl<T: Clone> FileIOTrait<T> for Direction {
     fn to_vec(&mut self) -> Vec<u8> {
         panic!("Direction is a directory");
     }
+
+    fn hash(&self) -> u64 {
+        self.inode
+    }
+}
+
+fn hash_path(path: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    hasher.finish()
 }

@@ -55,6 +55,7 @@ unsafe impl<'a, T: Send + Clone> Sync for AndroidEmulator<'a, T> {}
 pub(crate) struct AndroidEmulatorInner<'a, T: Clone> {
     pub pid: u32,
     pub ppid: u32,
+    pub process_uid: i32,
     pub proc_name: String,
     pub errno: u64,
     pub brk: u64,
@@ -109,6 +110,7 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                 running: AtomicBool::new(false),
                 pid,
                 ppid,
+                process_uid: 10261,
                 proc_name,
                 errno,
                 memory,
@@ -240,6 +242,14 @@ impl<'a, T: Clone> AndroidEmulator<'a, T> {
                 AbstractTask::KitKatThread(_) => unreachable!(),
             },
         }
+    }
+
+    pub fn set_process_uid(&self, process_uid: i32) {
+        self.inner_mut().process_uid = process_uid;
+    }
+
+    pub fn get_process_uid(&self) -> i32 {
+        self.inner_mut().process_uid
     }
 
     pub fn find_caller(&self) -> Option<RcUnsafeCell<LinuxModule<'a, T>>> {

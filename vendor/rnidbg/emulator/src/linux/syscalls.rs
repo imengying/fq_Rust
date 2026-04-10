@@ -786,7 +786,7 @@ pub fn syscall_geteuid<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulato
         println!("syscall geteuid()");
     }
 
-    ret_i32!(backend, 10261)
+    ret_i32!(backend, emulator.get_process_uid())
 }
 
 pub fn syscall_renameat<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator<T>) {
@@ -907,7 +907,7 @@ pub fn syscall_getuid<T: Clone>(backend: &Backend<T>, emulator: &AndroidEmulator
     if option_env!("PRINT_SYSCALL_LOG") == Some("1") {
         println!("syscall getuid()");
     }
-    ret_i32!(backend, 10261);
+    ret_i32!(backend, emulator.get_process_uid());
 }
 
 pub fn syscall_clone<'a, T: Clone>(backend: &Backend<'a, T>, emulator: &AndroidEmulator<'a, T>) {
